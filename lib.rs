@@ -6,7 +6,18 @@ use std::str;
 
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
-pub fn lossy_to_string(input: &[u8]) -> Cow<str> {
+/// A re-implementation of std::str::from_utf8
+pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {
+    let (s, status) = decode_step(input);
+    match status {
+        DecodeStepStatus::Ok => Ok(s),
+        DecodeStepStatus::Incomplete(_) |
+        DecodeStepStatus::Error { .. } => Err(s.len()),
+    }
+}
+
+/// A re-implementation of String::from_utf8_lossy
+pub fn string_from_utf8_lossy(input: &[u8]) -> Cow<str> {
     // The first step is special: we want to return Cow::Borrowed if possible.
     let (s, status) = decode_step(input);
     let mut remaining = match status {
@@ -19,7 +30,7 @@ pub fn lossy_to_string(input: &[u8]) -> Cow<str> {
     let mut string = s.to_owned();
     loop {
         string.push_str(REPLACEMENT_CHARACTER);
-        if Some(input) = remaining {
+        if let Some(input) = remaining {
             let (s, status) = decode_step(input);
             string.push_str(s);
             remaining = match status {
@@ -36,6 +47,10 @@ pub fn lossy_to_string(input: &[u8]) -> Cow<str> {
     string.into()
 }
 
+/// Low-level UTF-8 decoding.
+///
+/// Return the (possibly empty) str slice for the prefix of `input` that was well-formed UTF-8,
+/// and details about the rest of the input.
 pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
     let mut position = 0;
     loop {
@@ -142,8 +157,16 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
 
 #[must_use]
 pub enum DecodeStepStatus<'a> {
+    /// The input was entirely well-formed
     Ok,
+
+    /// There was a decoding error.
+    /// Each such error should be represented as one U+FFFD replacement character in lossy decoding.
     Error { remaining_input_after_error: &'a [u8] },
+
+    /// The end of the input was reached in the middle of an UTF-8 sequence that is valid so far.
+    /// More input (up to 3 more bytes) is required to determine if it is well-formed.
+    /// If no more input is available, this is a decoding error.
     Incomplete(IncompleteSequence),
 }
 
@@ -155,6 +178,7 @@ pub struct IncompleteSequence {
 }
 
 impl IncompleteSequence {
+    /// Consume more input to attempt to make this incomplete sequence complete.
     pub fn complete(mut self, input: &[u8]) -> CompleteResult {
         let width = width(self.first);
         debug_assert!(0 < self.len && self.len < width && width <= 4);
@@ -180,7 +204,7 @@ impl IncompleteSequence {
         macro_rules! check {
             ($valid: expr) => {
                 if !$valid {
-                    return CompleteResult::Error(&input[i..])
+                    return CompleteResult::Error { remaining_input_after_error: &input[i..] }
                 }
             }
         }
@@ -211,13 +235,22 @@ impl IncompleteSequence {
         }
 
         let ch = StrChar { bytes: [self.first, self.second, self.third, fourth] };
-        CompleteResult::Ok(ch, &input[i..])
+        CompleteResult::Ok { code_point: ch, remaining_input: &input[i..] }
     }
 }
 
 pub enum CompleteResult<'a> {
-    Ok(StrChar, &'a [u8]),
-    Error(&'a [u8]),
+    /// A well-formed code point that was split across input chunks.
+    Ok { code_point: StrChar, remaining_input: &'a [u8] },
+
+    /// There was a decoding error.
+    /// Each such error should be represented as one U+FFFD replacement character in lossy decoding.
+    Error { remaining_input_after_error: &'a [u8] },
+
+    /// There is still not enough input to determine if this is a well-formed code point
+    /// or a decoding error.
+    /// This can only happen if the `input` argument to `IncompleteSequence::complete`
+    /// is less than three bytes.
     StillIncomplete(IncompleteSequence),
 }
 
