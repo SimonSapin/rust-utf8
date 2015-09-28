@@ -8,47 +8,36 @@ pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
 pub fn lossy_to_string(input: &[u8]) -> Cow<str> {
     // The first step is special: we want to return Cow::Borrowed if possible.
-    let (mut string, mut remaining) = match step(input) {
-        StepResult::Valid(s) => return s.into(),
-        StepResult::Incomplete(s, _) => {
-            let mut string = s.to_owned();
-            string.push_str(REPLACEMENT_CHARACTER);
-            return string.into()
-        }
-        StepResult::Error(s, remaining) => (s.to_owned(), remaining),
-    };
+    let (s, mut status) = decode_step(input);
+    if matches!(status, DecodeStepStatus::Ok) {
+        return s.into()
+    }
+    let mut string = s.to_owned();
     loop {
         string.push_str(REPLACEMENT_CHARACTER);
-        match step(remaining) {
-            StepResult::Valid(s) => {
-                string.push_str(s);
-                break
-            }
-            StepResult::Incomplete(s, _) => {
-                string.push_str(s);
-                string.push_str(REPLACEMENT_CHARACTER);
-                break
-            }
-            StepResult::Error(s, r) => {
-                string.push_str(s);
-                string.push_str(REPLACEMENT_CHARACTER);
-                remaining = r
-            }
+        if matches!(status, DecodeStepStatus::Incomplete(_)) {
+            break
         }
+        let (s, next_status) = decode_step(input);
+        string.push_str(s);
+        status = next_status;
     }
     string.into()
 }
 
-pub fn step(input: &[u8]) -> StepResult {
+pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
     let mut iter = input.iter();
     loop {
         let first = match iter.next() {
             Some(&b) => b,
             // we're at the end of the iterator and a codepoint
             // boundary at the same time, so this string is valid.
-            None => return StepResult::Valid(unsafe {
-                str::from_utf8_unchecked(input)
-            })
+            None => return (
+                unsafe {
+                    str::from_utf8_unchecked(input)
+                },
+                DecodeStepStatus::Ok,
+            )
         };
         // ASCII characters are always valid, so only large
         // bytes need more examination.
@@ -70,14 +59,22 @@ pub fn step(input: &[u8]) -> StepResult {
                     match iter.next() {
                         Some(&b) => b,
                         None => {
-                            return StepResult::Incomplete(
+                            return (
                                 valid_prefix!($incomplete_sequence_len),
-                                IncompleteSequence {
-                                    bytes: [$first, $second, $third, $incomplete_sequence_len]
-                                }
+                                DecodeStepStatus::Incomplete(
+                                    IncompleteSequence {
+                                        bytes: [$first, $second, $third, $incomplete_sequence_len]
+                                    }
+                                )
                             )
                         }
                     }
+                }
+            }
+
+            macro_rules! error {
+                () => {
+                    DecodeStepStatus::Error { remaining_input_after_error: iter.as_slice() }
                 }
             }
 
@@ -110,30 +107,31 @@ pub fn step(input: &[u8]) -> StepResult {
                 }
             };
             if !valid {
-                return StepResult::Error(valid_prefix!(2), iter.as_slice())
+                return (valid_prefix!(2), error!())
             }
             if width == 2 {
                 continue
             }
             let third = next!(first, second, 0, 2);
             if !is_continuation_byte(third) {
-                return StepResult::Error(valid_prefix!(3), iter.as_slice())
+                return (valid_prefix!(3), error!())
             }
             if width == 3 {
                 continue
             }
             let fourth = next!(first, second, third, 3);
             if !is_continuation_byte(fourth) {
-                return StepResult::Error(valid_prefix!(4), iter.as_slice())
+                return (valid_prefix!(4), error!())
             }
         }
     }
 }
 
-pub enum StepResult<'a> {
-    Valid(&'a str),
-    Error(&'a str, &'a [u8]),
-    Incomplete(&'a str, IncompleteSequence),
+#[must_use]
+pub enum DecodeStepStatus<'a> {
+    Ok,
+    Error { remaining_input_after_error: &'a [u8] },
+    Incomplete(IncompleteSequence),
 }
 
 pub struct IncompleteSequence {
