@@ -43,10 +43,10 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
         // bytes need more examination.
         if first >= 128 {
             macro_rules! valid_prefix {
-                ($incomplete_sequence_len: expr) => {
+                ($current_sequence_len: expr) => {
                     {
                         let consumed = iter.as_slice().as_ptr() as usize - input.as_ptr() as usize;
-                        let valid = consumed - $incomplete_sequence_len as usize;
+                        let valid = consumed - $current_sequence_len as usize;
                         unsafe {
                             str::from_utf8_unchecked(&input[..valid])
                         }
@@ -55,15 +55,18 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
             }
 
             macro_rules! next {
-                ($first: expr, $second: expr, $third: expr, $incomplete_sequence_len: expr) => {
+                ($current_sequence_len: expr, $first: expr, $second: expr, $third: expr) => {
                     match iter.next() {
                         Some(&b) => b,
                         None => {
                             return (
-                                valid_prefix!($incomplete_sequence_len),
+                                valid_prefix!($current_sequence_len),
                                 DecodeStepStatus::Incomplete(
                                     IncompleteSequence {
-                                        bytes: [$first, $second, $third, $incomplete_sequence_len]
+                                        len: $current_sequence_len,
+                                        first: $first,
+                                        second: $second,
+                                        third: $third,
                                     }
                                 )
                             )
@@ -72,9 +75,16 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                 }
             }
 
-            macro_rules! error {
-                () => {
-                    DecodeStepStatus::Error { remaining_input_after_error: iter.as_slice() }
+            macro_rules! check {
+                ($valid: expr, $current_sequence_len: expr) => {
+                    if !$valid {
+                        return (
+                            valid_prefix!($current_sequence_len),
+                            DecodeStepStatus::Error {
+                                remaining_input_after_error: iter.as_slice()
+                            }
+                        )
+                    }
                 }
             }
 
@@ -97,7 +107,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
             // UTF8-4      = %xF0 %x90-BF 2( UTF8-tail ) / %xF1-F3 3( UTF8-tail ) /
             //               %xF4 %x80-8F 2( UTF8-tail )
             let width = UTF8_CHAR_WIDTH[first as usize];
-            let second = next!(first, 0, 0, 1);
+            let second = next!(1, first, 0, 0);
             let valid = match width {
                 2 => is_continuation_byte(second),
                 3 => valid_three_bytes_sequence_prefix(first, second),
@@ -106,23 +116,17 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                     valid_four_bytes_sequence_prefix(first, second)
                 }
             };
-            if !valid {
-                return (valid_prefix!(2), error!())
-            }
+            check!(valid, 2);
             if width == 2 {
                 continue
             }
-            let third = next!(first, second, 0, 2);
-            if !is_continuation_byte(third) {
-                return (valid_prefix!(3), error!())
-            }
+            let third = next!(2, first, second, 0);
+            check!(is_continuation_byte(third), 3);
             if width == 3 {
                 continue
             }
-            let fourth = next!(first, second, third, 3);
-            if !is_continuation_byte(fourth) {
-                return (valid_prefix!(4), error!())
-            }
+            let fourth = next!(3, first, second, third);
+            check!(is_continuation_byte(fourth), 4);
         }
     }
 }
@@ -135,49 +139,70 @@ pub enum DecodeStepStatus<'a> {
 }
 
 pub struct IncompleteSequence {
-    /// Use the 4th byte as a length field,
-    /// but [u8; 4] makes code easier than [u8; 3] and u8.
-    bytes: [u8; 4],
+    len: u8,
+    first: u8,
+    second: u8,
+    third: u8,
 }
 
 impl IncompleteSequence {
     pub fn complete(mut self, input: &[u8]) -> CompleteResult {
-        let width = width(self.bytes[0]);
-        let len = self.bytes[3] as usize;
-        debug_assert!(0 < len && len < width && width <= 4);
-        let missing = width - len;
-        for i in 0..missing {
-            match input.get(i) {
-                Some(&byte) => {
-                    let valid = if len + i == 1 {
-                        match width {
-                            2 => is_continuation_byte(byte),
-                            3 => valid_three_bytes_sequence_prefix(self.bytes[0], byte),
-                            _ => {
-                                debug_assert!(width == 4);
-                                valid_four_bytes_sequence_prefix(self.bytes[0], byte)
-                            }
-                        }
-                    } else {
-                        is_continuation_byte(byte)
-                    };
-                    if valid {
-                        // If len + i == 3 this overrites our “len field”, but that’s OK
-                        // as we’re necessarily about to return CompleteResult::Ok.
-                        self.bytes[len + i] = byte
-                    } else {
-                        return CompleteResult::Error(&input[i + 1..])
+        let width = width(self.first);
+        debug_assert!(0 < self.len && self.len < width && width <= 4);
+
+        let mut i = 0;
+        macro_rules! next {
+            () => {
+                match input.get(i) {
+                    Some(&b) => {
+                        i += 1;
+                        b
                     }
-                }
-                None => {
-                    let new_len = len + i;
-                    debug_assert!(new_len < 4);
-                    self.bytes[3] = new_len as u8;
-                    return CompleteResult::StillIncomplete(self)
+                    None => {
+                        let new_len = self.len + i as u8;
+                        debug_assert!(new_len < 4);
+                        self.len = new_len;
+                        return CompleteResult::StillIncomplete(self)
+                    }
                 }
             }
         }
-        CompleteResult::Ok(StrChar { bytes: self.bytes }, &input[missing..])
+
+        macro_rules! check {
+            ($valid: expr) => {
+                if !$valid {
+                    return CompleteResult::Error(&input[i..])
+                }
+            }
+        }
+
+        if self.len < 2 {
+            self.second = next!();
+            let valid = match width {
+                2 => is_continuation_byte(self.second),
+                3 => valid_three_bytes_sequence_prefix(self.first, self.second),
+                _ => {
+                    debug_assert!(width == 4);
+                    valid_four_bytes_sequence_prefix(self.first, self.second)
+                }
+            };
+            check!(valid);
+        }
+
+        let mut fourth = 0;
+        if width > 2 {
+            if self.len < 3 {
+                self.third = next!();
+                check!(is_continuation_byte(self.third));
+            }
+            if width > 3 {
+                fourth = next!();
+                check!(is_continuation_byte(fourth));
+            }
+        }
+
+        let ch = StrChar { bytes: [self.first, self.second, self.third, fourth] };
+        CompleteResult::Ok(ch, &input[i..])
     }
 }
 
@@ -197,7 +222,7 @@ impl Deref for StrChar {
 
     #[inline]
     fn deref(&self) -> &str {
-        let width = width(self.bytes[0]);
+        let width = width(self.bytes[0]) as usize;
         let bytes = &self.bytes[..width];
         unsafe {
             str::from_utf8_unchecked(bytes)
@@ -206,8 +231,8 @@ impl Deref for StrChar {
 }
 
 #[inline]
-fn width(first_byte: u8) -> usize {
-    UTF8_CHAR_WIDTH[first_byte as usize] as usize
+fn width(first_byte: u8) -> u8 {
+    UTF8_CHAR_WIDTH[first_byte as usize]
 }
 
 // https://tools.ietf.org/html/rfc3629
