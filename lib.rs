@@ -255,6 +255,7 @@ pub enum CompleteResult<'a> {
 }
 
 /// Like `char`, but represented in memory as UTF-8
+#[derive(Copy, Clone)]
 pub struct StrChar {
     bytes: [u8; 4],
 }
@@ -269,6 +270,12 @@ impl Deref for StrChar {
         unsafe {
             str::from_utf8_unchecked(bytes)
         }
+    }
+}
+
+impl StrChar {
+    pub fn to_char(&self) -> char {
+        self.chars().next().unwrap()
     }
 }
 
