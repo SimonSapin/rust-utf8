@@ -1,0 +1,12 @@
+[package]
+name = "utf8"
+version = "0.1.0"
+authors = ["Simon Sapin <simon.sapin@exyr.org>"]
+description = "Incremental UTF-8 decoding with error handling and no mandatory memory allocation."
+license = "MIT / Apache-2.0"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+matches = "0.1.2"
