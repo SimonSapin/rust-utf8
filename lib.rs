@@ -8,19 +8,30 @@ pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
 pub fn lossy_to_string(input: &[u8]) -> Cow<str> {
     // The first step is special: we want to return Cow::Borrowed if possible.
-    let (s, mut status) = decode_step(input);
-    if matches!(status, DecodeStepStatus::Ok) {
-        return s.into()
-    }
+    let (s, status) = decode_step(input);
+    let mut remaining = match status {
+        DecodeStepStatus::Ok => return s.into(),
+        DecodeStepStatus::Incomplete(_) => None,
+        DecodeStepStatus::Error { remaining_input_after_error } => {
+            Some(remaining_input_after_error)
+        }
+    };
     let mut string = s.to_owned();
     loop {
         string.push_str(REPLACEMENT_CHARACTER);
-        if matches!(status, DecodeStepStatus::Incomplete(_)) {
+        if Some(input) = remaining {
+            let (s, status) = decode_step(input);
+            string.push_str(s);
+            remaining = match status {
+                DecodeStepStatus::Ok => break,
+                DecodeStepStatus::Incomplete(_) => None,
+                DecodeStepStatus::Error { remaining_input_after_error } => {
+                    Some(remaining_input_after_error)
+                }
+            };
+        } else {
             break
         }
-        let (s, next_status) = decode_step(input);
-        string.push_str(s);
-        status = next_status;
     }
     string.into()
 }
