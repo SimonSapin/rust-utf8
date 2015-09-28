@@ -1,9 +1,43 @@
 #[macro_use] extern crate matches;
 
+use std::borrow::Cow;
 use std::ops::Deref;
 use std::str;
 
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
+
+pub fn lossy_to_string(input: &[u8]) -> Cow<str> {
+    // The first step is special: we want to return Cow::Borrowed if possible.
+    let (mut string, mut remaining) = match step(input) {
+        StepResult::Valid(s) => return s.into(),
+        StepResult::Incomplete(s, _) => {
+            let mut string = s.to_owned();
+            string.push_str(REPLACEMENT_CHARACTER);
+            return string.into()
+        }
+        StepResult::Error(s, remaining) => (s.to_owned(), remaining),
+    };
+    loop {
+        string.push_str(REPLACEMENT_CHARACTER);
+        match step(remaining) {
+            StepResult::Valid(s) => {
+                string.push_str(s);
+                break
+            }
+            StepResult::Incomplete(s, _) => {
+                string.push_str(s);
+                string.push_str(REPLACEMENT_CHARACTER);
+                break
+            }
+            StepResult::Error(s, r) => {
+                string.push_str(s);
+                string.push_str(REPLACEMENT_CHARACTER);
+                remaining = r
+            }
+        }
+    }
+    string.into()
+}
 
 pub fn step(input: &[u8]) -> StepResult {
     let mut iter = input.iter();
