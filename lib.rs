@@ -26,11 +26,11 @@ pub fn lossy_to_string(input: &[u8]) -> Cow<str> {
 }
 
 pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
-    let mut iter = input.iter();
+    let mut position = 0;
     loop {
-        let first = match iter.next() {
+        let first = match input.get(position) {
             Some(&b) => b,
-            // we're at the end of the iterator and a codepoint
+            // we're at the end of the input and a codepoint
             // boundary at the same time, so this string is valid.
             None => return (
                 unsafe {
@@ -41,22 +41,20 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
         };
         // ASCII characters are always valid, so only large
         // bytes need more examination.
-        if first >= 128 {
+        if first < 128 {
+            position += 1
+        } else {
             macro_rules! valid_prefix {
                 ($current_sequence_len: expr) => {
-                    {
-                        let consumed = iter.as_slice().as_ptr() as usize - input.as_ptr() as usize;
-                        let valid = consumed - $current_sequence_len as usize;
-                        unsafe {
-                            str::from_utf8_unchecked(&input[..valid])
-                        }
+                    unsafe {
+                        str::from_utf8_unchecked(&input[..position])
                     }
                 }
             }
 
             macro_rules! next {
                 ($current_sequence_len: expr, $first: expr, $second: expr, $third: expr) => {
-                    match iter.next() {
+                    match input.get(position + $current_sequence_len) {
                         Some(&b) => b,
                         None => {
                             return (
@@ -81,7 +79,8 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                         return (
                             valid_prefix!($current_sequence_len),
                             DecodeStepStatus::Error {
-                                remaining_input_after_error: iter.as_slice()
+                                remaining_input_after_error:
+                                    &input[..position + $current_sequence_len]
                             }
                         )
                     }
@@ -117,16 +116,15 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                 }
             };
             check!(valid, 2);
-            if width == 2 {
-                continue
+            if width > 2 {
+                let third = next!(2, first, second, 0);
+                check!(is_continuation_byte(third), 3);
+                if width > 3 {
+                    let fourth = next!(3, first, second, third);
+                    check!(is_continuation_byte(fourth), 4);
+                }
             }
-            let third = next!(2, first, second, 0);
-            check!(is_continuation_byte(third), 3);
-            if width == 3 {
-                continue
-            }
-            let fourth = next!(3, first, second, third);
-            check!(is_continuation_byte(fourth), 4);
+            position += width as usize;
         }
     }
 }
