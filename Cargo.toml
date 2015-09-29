@@ -2,8 +2,9 @@
 name = "utf8"
 version = "0.1.0"
 authors = ["Simon Sapin <simon.sapin@exyr.org>"]
-description = "Incremental UTF-8 decoding with error handling and no mandatory memory allocation."
+description = "Incremental, zero-copy UTF-8 decoding with error handling"
 license = "MIT / Apache-2.0"
+repository = "https://github.com/SimonSapin/rust-utf8"
 
 [lib]
 path = "lib.rs"
