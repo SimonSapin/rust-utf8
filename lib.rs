@@ -6,6 +6,69 @@ use std::str;
 /// The replacement character. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
+pub struct PushLossyDecoder<F: FnMut(&str)> {
+    push_str: F,
+    incomplete_sequence: Option<IncompleteSequence>,
+}
+
+impl<F: FnMut(&str)> PushLossyDecoder<F> {
+    #[inline]
+    pub fn new(push_str: F) -> Self {
+        PushLossyDecoder {
+            push_str: push_str,
+            incomplete_sequence: None,
+        }
+    }
+
+    pub fn feed(&mut self, mut input: &[u8]) {
+        if let Some(incomplete_sequence) = self.incomplete_sequence.take() {
+            match incomplete_sequence.complete(input) {
+                CompleteResult::Ok { code_point, remaining_input } => {
+                    (self.push_str)(&code_point);
+                    input = remaining_input
+                }
+                CompleteResult::Error { remaining_input_after_error } => {
+                    (self.push_str)(REPLACEMENT_CHARACTER);
+                    input = remaining_input_after_error
+                }
+                CompleteResult::StillIncomplete(incomplete_sequence) => {
+                    self.incomplete_sequence = Some(incomplete_sequence);
+                    return
+                }
+            }
+        }
+        loop {
+            let (s, status) = decode_step(input);
+            (self.push_str)(s);
+            match status {
+                DecodeStepStatus::Ok => break,
+                DecodeStepStatus::Incomplete(incomplete_sequence) => {
+                    self.incomplete_sequence = Some(incomplete_sequence);
+                    break
+                }
+                DecodeStepStatus::Error { remaining_input_after_error } => {
+                    (self.push_str)(REPLACEMENT_CHARACTER);
+                    input = remaining_input_after_error
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn end(self) {
+        // drop
+    }
+}
+
+impl<F: FnMut(&str)> Drop for PushLossyDecoder<F> {
+    #[inline]
+    fn drop(&mut self) {
+        if self.incomplete_sequence.is_some() {
+            (self.push_str)(REPLACEMENT_CHARACTER)
+        }
+    }
+}
+
 /// Low-level UTF-8 decoding.
 ///
 /// Return the (possibly empty) str slice for the prefix of `input` that was well-formed UTF-8,
@@ -249,7 +312,7 @@ fn width(first_byte: u8) -> u8 {
 }
 
 // https://tools.ietf.org/html/rfc3629
-static UTF8_CHAR_WIDTH: [u8; 256] = [
+const UTF8_CHAR_WIDTH: &'static [u8; 256] = &[
     1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
     1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x1F
     1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
