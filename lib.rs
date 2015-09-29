@@ -1,51 +1,10 @@
 #[macro_use] extern crate matches;
 
-use std::borrow::Cow;
 use std::ops::Deref;
 use std::str;
 
+/// The replacement character. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
-
-/// A re-implementation of std::str::from_utf8
-pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {
-    let (s, status) = decode_step(input);
-    match status {
-        DecodeStepStatus::Ok => Ok(s),
-        DecodeStepStatus::Incomplete(_) |
-        DecodeStepStatus::Error { .. } => Err(s.len()),
-    }
-}
-
-/// A re-implementation of String::from_utf8_lossy
-pub fn string_from_utf8_lossy(input: &[u8]) -> Cow<str> {
-    // The first step is special: we want to return Cow::Borrowed if possible.
-    let (s, status) = decode_step(input);
-    let mut remaining = match status {
-        DecodeStepStatus::Ok => return s.into(),
-        DecodeStepStatus::Incomplete(_) => None,
-        DecodeStepStatus::Error { remaining_input_after_error } => {
-            Some(remaining_input_after_error)
-        }
-    };
-    let mut string = s.to_owned();
-    loop {
-        string.push_str(REPLACEMENT_CHARACTER);
-        if let Some(input) = remaining {
-            let (s, status) = decode_step(input);
-            string.push_str(s);
-            remaining = match status {
-                DecodeStepStatus::Ok => break,
-                DecodeStepStatus::Incomplete(_) => None,
-                DecodeStepStatus::Error { remaining_input_after_error } => {
-                    Some(remaining_input_after_error)
-                }
-            };
-        } else {
-            break
-        }
-    }
-    string.into()
-}
 
 /// Low-level UTF-8 decoding.
 ///
@@ -71,7 +30,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
             position += 1
         } else {
             macro_rules! valid_prefix {
-                ($current_sequence_len: expr) => {
+                () => {
                     unsafe {
                         str::from_utf8_unchecked(&input[..position])
                     }
@@ -84,7 +43,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                         Some(&b) => b,
                         None => {
                             return (
-                                valid_prefix!($current_sequence_len),
+                                valid_prefix!(),
                                 DecodeStepStatus::Incomplete(
                                     IncompleteSequence {
                                         len: $current_sequence_len,
@@ -103,10 +62,10 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                 ($valid: expr, $current_sequence_len: expr) => {
                     if !$valid {
                         return (
-                            valid_prefix!($current_sequence_len),
+                            valid_prefix!(),
                             DecodeStepStatus::Error {
                                 remaining_input_after_error:
-                                    &input[..position + $current_sequence_len]
+                                    &input[position + $current_sequence_len..]
                             }
                         )
                     }
@@ -132,6 +91,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
             // UTF8-4      = %xF0 %x90-BF 2( UTF8-tail ) / %xF1-F3 3( UTF8-tail ) /
             //               %xF4 %x80-8F 2( UTF8-tail )
             let width = UTF8_CHAR_WIDTH[first as usize];
+            check!(width != 0, 1);
             let second = next!(1, first, 0, 0);
             let valid = match width {
                 2 => is_continuation_byte(second),
@@ -141,13 +101,13 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                     valid_four_bytes_sequence_prefix(first, second)
                 }
             };
-            check!(valid, 2);
+            check!(valid, 1);
             if width > 2 {
                 let third = next!(2, first, second, 0);
-                check!(is_continuation_byte(third), 3);
+                check!(is_continuation_byte(third), 2);
                 if width > 3 {
                     let fourth = next!(3, first, second, third);
-                    check!(is_continuation_byte(fourth), 4);
+                    check!(is_continuation_byte(fourth), 3);
                 }
             }
             position += width as usize;
@@ -156,6 +116,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
 }
 
 #[must_use]
+#[derive(Debug)]
 pub enum DecodeStepStatus<'a> {
     /// The input was entirely well-formed
     Ok,
@@ -166,10 +127,11 @@ pub enum DecodeStepStatus<'a> {
 
     /// The end of the input was reached in the middle of an UTF-8 sequence that is valid so far.
     /// More input (up to 3 more bytes) is required to determine if it is well-formed.
-    /// If no more input is available, this is a decoding error.
+    /// If at the end of the input, this is a decoding error.
     Incomplete(IncompleteSequence),
 }
 
+#[derive(Debug)]
 pub struct IncompleteSequence {
     len: u8,
     first: u8,
@@ -183,16 +145,13 @@ impl IncompleteSequence {
         let width = width(self.first);
         debug_assert!(0 < self.len && self.len < width && width <= 4);
 
-        let mut i = 0;
+        let mut position = 0;
         macro_rules! next {
             () => {
-                match input.get(i) {
-                    Some(&b) => {
-                        i += 1;
-                        b
-                    }
+                match input.get(position) {
+                    Some(&b) => b,
                     None => {
-                        let new_len = self.len + i as u8;
+                        let new_len = self.len + position as u8;
                         debug_assert!(new_len < 4);
                         self.len = new_len;
                         return CompleteResult::StillIncomplete(self)
@@ -204,7 +163,7 @@ impl IncompleteSequence {
         macro_rules! check {
             ($valid: expr) => {
                 if !$valid {
-                    return CompleteResult::Error { remaining_input_after_error: &input[i..] }
+                    return CompleteResult::Error { remaining_input_after_error: &input[position..] }
                 }
             }
         }
@@ -220,6 +179,7 @@ impl IncompleteSequence {
                 }
             };
             check!(valid);
+            position += 1;
         }
 
         let mut fourth = 0;
@@ -227,15 +187,17 @@ impl IncompleteSequence {
             if self.len < 3 {
                 self.third = next!();
                 check!(is_continuation_byte(self.third));
+                position += 1;
             }
             if width > 3 {
                 fourth = next!();
                 check!(is_continuation_byte(fourth));
+                position += 1;
             }
         }
 
         let ch = StrChar { bytes: [self.first, self.second, self.third, fourth] };
-        CompleteResult::Ok { code_point: ch, remaining_input: &input[i..] }
+        CompleteResult::Ok { code_point: ch, remaining_input: &input[position..] }
     }
 }
 
@@ -251,6 +213,7 @@ pub enum CompleteResult<'a> {
     /// or a decoding error.
     /// This can only happen if the `input` argument to `IncompleteSequence::complete`
     /// is less than three bytes.
+    /// If at the end of the input, this is a decoding error.
     StillIncomplete(IncompleteSequence),
 }
 
@@ -274,6 +237,7 @@ impl Deref for StrChar {
 }
 
 impl StrChar {
+    #[inline]
     pub fn to_char(&self) -> char {
         self.chars().next().unwrap()
     }
@@ -306,8 +270,11 @@ static UTF8_CHAR_WIDTH: [u8; 256] = [
 
 #[inline]
 fn is_continuation_byte(b: u8) -> bool {
-     b & !CONTINUATION_MASK == CONTINUATION_TAG
+    const CONTINUATION_MASK: u8 = 0b1100_0000;
+    const CONTINUATION_TAG: u8 = 0b1000_0000;
+    b & CONTINUATION_MASK == CONTINUATION_TAG
 }
+
 
 #[inline]
 fn valid_three_bytes_sequence_prefix(first: u8, second: u8) -> bool {
@@ -328,9 +295,3 @@ fn valid_four_bytes_sequence_prefix(first: u8, second: u8) -> bool {
         (0xF4         , 0x80 ... 0x8F)
     )
 }
-
-/// Mask of the value bits of a continuation byte
-const CONTINUATION_MASK: u8 = 0b0011_1111;
-
-/// Value of the tag bits (tag mask is !CONTINUATION_MASK) of a continuation byte
-const CONTINUATION_TAG: u8 = 0b1000_0000;
