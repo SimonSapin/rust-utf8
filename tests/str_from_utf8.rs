@@ -4,16 +4,13 @@ use utf8::{Decoder, DecodedPiece};
 
 /// A re-implementation of std::str::from_utf8
 pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {
+    if input.is_empty() {
+        return Ok("")
+    }
     let mut decoder = Decoder::new();
     let mut iter = decoder.feed(input);
     match iter.next() {
         Some(DecodedPiece::InputSlice(s)) => {
-//            match iter.next() {
-//                Some(DecodedPiece::InputSlice(_)) |
-//                Some(DecodedPiece::AcrossChunks(_)) => unreachable!(),
-//                Some(DecodedPiece::Error) => Err(s.len()),
-//                None => Ok(s)
-//            }
             if iter.eof() {
                 Ok(s)
             } else {
@@ -22,13 +19,7 @@ pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {
         }
         Some(DecodedPiece::AcrossChunks(_)) => unreachable!(),
         Some(DecodedPiece::Error) => Err(0),
-        None => {
-            if iter.eof() {
-                Ok("")
-            } else {
-                Err(0)
-            }
-        }
+        None => Err(0)
     }
 }
 
