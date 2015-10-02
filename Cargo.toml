@@ -16,3 +16,6 @@ matches = "0.1.2"
 
 [profile.test]
 opt-level = 3
+
+[profile.bench]
+#debug = true

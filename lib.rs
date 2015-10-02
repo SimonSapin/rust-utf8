@@ -38,6 +38,7 @@ struct IncompleteSequence {
 
 impl Decoder {
     /// Create a new decoder.
+    #[inline]
     pub fn new() -> Decoder {
         Decoder {
             has_undecoded_input: false,
@@ -57,6 +58,7 @@ impl Decoder {
     /// record that partial sequence for use in the next `feed()` call.
     ///
     /// Panics if the iterator returned by an earlier `feed()` call was not exhausted.
+    #[inline]
     pub fn feed<'d, 'i>(&'d mut self, input_chunk: &'i [u8]) -> ChunkDecoder<'d, 'i> {
         assert!(!self.has_undecoded_input, "The previous `utf8::ChunkDecoder` must be exhausted \
                 before `utf8::Decoder::feed` can be called again.");
@@ -74,6 +76,7 @@ impl Decoder {
     /// which dereference to a `"\u{FFFD}"` replacement character.
     ///
     /// Panics if the iterator returned by an earlier `feed()` call was not exhausted.
+    #[inline]
     pub fn end(self) -> Option<DecodedPiece<'static>> {
         assert!(!self.has_undecoded_input, "The previous `utf8::ChunkDecoder` must be exhausted \
                 before `utf8::Decoder::end` can be called.");

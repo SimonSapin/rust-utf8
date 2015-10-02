@@ -11,7 +11,10 @@ pub fn string_from_utf8_lossy(input: &[u8]) -> Cow<str> {
         match iter.next() {
             None => return "".into(),
             Some(DecodedPiece::InputSlice(ref s)) if iter.eof() => return (*s).into(),
-            Some(first) => string = first.to_owned(),
+            Some(first) => {
+                string = String::with_capacity(input.len());
+                string.push_str(&first)
+            }
         };
         for piece in iter {
             string.push_str(&piece)
