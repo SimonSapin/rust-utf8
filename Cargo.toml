@@ -9,7 +9,6 @@ repository = "https://github.com/SimonSapin/rust-utf8"
 [lib]
 path = "lib.rs"
 test = false
-doctest = false
 
 [dependencies]
 matches = "0.1.2"

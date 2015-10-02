@@ -6,6 +6,23 @@ use std::str;
 /// The replacement character. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
+/// A stateful, incremental, zero-copy UTF-8 decoder with error handling.
+///
+/// Example: a simplified version of `String::from_utf8_lossy` can be written as:
+///
+/// ```rust
+/// fn string_from_utf8_lossy(input: &[u8]) -> String {
+///     let mut string = String::new();
+///     let mut decoder = utf8::Decoder::new();
+///     for piece in decoder.feed(input) {
+///         string.push_str(&piece)
+///     }
+///     if let Some(piece) = decoder.end() {
+///         string.push_str(&piece)
+///     }
+///     string
+/// }
+/// ```
 pub struct Decoder {
     incomplete_sequence: IncompleteSequence,
     has_undecoded_input: bool,
@@ -20,6 +37,7 @@ struct IncompleteSequence {
 }
 
 impl Decoder {
+    /// Create a new decoder.
     pub fn new() -> Decoder {
         Decoder {
             has_undecoded_input: false,
@@ -32,8 +50,15 @@ impl Decoder {
         }
     }
 
+    /// Feed some input bytes to the decoder.
+    /// Returns an iterator of decoded pieces which dereference to `&str`.
+    ///
+    /// If the input ends with an incomplete but potentially valid UTF-8 sequence,
+    /// record that partial sequence for use in the next `feed()` call.
+    ///
+    /// Panics if the iterator returned by an earlier `feed()` call was not exhausted.
     pub fn feed<'d, 'i>(&'d mut self, input_chunk: &'i [u8]) -> ChunkDecoder<'d, 'i> {
-        assert!(!self.has_undecoded_input, "The previous `utf8::ChunkDecoder` must be consumed \
+        assert!(!self.has_undecoded_input, "The previous `utf8::ChunkDecoder` must be exhausted \
                 before `utf8::Decoder::feed` can be called again.");
         self.has_undecoded_input = !input_chunk.is_empty();
         ChunkDecoder {
@@ -43,8 +68,14 @@ impl Decoder {
         }
     }
 
+    /// Consume the decoder and indicate the end of the input.
+    /// If the previous input chunk given to `feed()` ended with an incomplete UTF-8 sequence,
+    /// this returns `Some(DecodedPiece::Error)`
+    /// which dereference to a `"\u{FFFD}"` replacement character.
+    ///
+    /// Panics if the iterator returned by an earlier `feed()` call was not exhausted.
     pub fn end(self) -> Option<DecodedPiece<'static>> {
-        assert!(!self.has_undecoded_input, "The previous `utf8::ChunkDecoder` must be consumed \
+        assert!(!self.has_undecoded_input, "The previous `utf8::ChunkDecoder` must be exhausted \
                 before `utf8::Decoder::end` can be called.");
         if self.incomplete_sequence.len > 0 {
             Some(DecodedPiece::Error)
@@ -54,6 +85,7 @@ impl Decoder {
     }
 }
 
+/// An iterator decoding one chunk of input.
 pub struct ChunkDecoder<'d, 'i> {
     decoder: &'d mut Decoder,
     input_chunk: &'i [u8],
@@ -282,9 +314,18 @@ impl<'d, 'i> Iterator for ChunkDecoder<'d, 'i> {
     }
 }
 
+/// One piece of the incremental UTF-8 decoding.
+///
+/// Dereferences to `&str`, replacing each error with a single `"\u{FFFD}"` replacement character.
 pub enum DecodedPiece<'a> {
+    /// A string slice of consecutive well-formed UTF-8 input
     InputSlice(&'a str),
+
+    /// A single `char` that was split across more than one input chunks.
     AcrossChunks(StrChar),
+
+    /// Represents one decoding error.
+    /// Dereferences to a single `"\u{FFFD}"` replacement character for lossy decoding.
     Error,
 }
 
