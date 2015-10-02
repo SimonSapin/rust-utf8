@@ -152,7 +152,8 @@ impl<'d, 'i> ChunkDecoder<'d, 'i> {
         sequence!().len = 0;
         self.consume(position);
         Some(DecodedPiece::AcrossChunks(StrChar {
-            bytes: [sequence!().first, sequence!().second, sequence!().third, fourth]
+            bytes: [sequence!().first, sequence!().second, sequence!().third, fourth],
+            width: width as usize,
         }))
     }
 
@@ -304,6 +305,7 @@ impl<'a> Deref for DecodedPiece<'a> {
 #[derive(Copy, Clone)]
 pub struct StrChar {
     bytes: [u8; 4],
+    width: usize,
 }
 
 impl Deref for StrChar {
@@ -311,18 +313,10 @@ impl Deref for StrChar {
 
     #[inline]
     fn deref(&self) -> &str {
-        let width = width(self.bytes[0]) as usize;
-        let bytes = &self.bytes[..width];
+        let bytes = &self.bytes[..self.width];
         unsafe {
             str::from_utf8_unchecked(bytes)
         }
-    }
-}
-
-impl StrChar {
-    #[inline]
-    pub fn to_char(&self) -> char {
-        self.chars().next().unwrap()
     }
 }
 
