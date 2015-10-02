@@ -54,7 +54,6 @@ impl Decoder {
     }
 }
 
-
 pub struct ChunkDecoder<'d, 'i> {
     decoder: &'d mut Decoder,
     input_chunk: &'i [u8],
@@ -62,6 +61,7 @@ pub struct ChunkDecoder<'d, 'i> {
 }
 
 impl<'d, 'i> ChunkDecoder<'d, 'i> {
+    /// Return whether `next()` would return `None`.
     pub fn eof(&self) -> bool {
         self.input_chunk.is_empty() &&
         !self.has_error_next &&
