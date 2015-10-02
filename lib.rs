@@ -6,42 +6,6 @@ use std::str;
 /// The replacement character. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
-pub struct PushLossyDecoder<F: FnMut(&str)> {
-    push_str: F,
-    decoder: Decoder,
-}
-
-impl<F: FnMut(&str)> PushLossyDecoder<F> {
-    #[inline]
-    pub fn new(push_str: F) -> Self {
-        PushLossyDecoder {
-            push_str: push_str,
-            decoder: Decoder::new(),
-        }
-    }
-
-    pub fn feed(&mut self, input: &[u8]) {
-        for piece in self.decoder.feed(input) {
-            (self.push_str)(&piece);
-        }
-    }
-
-    #[inline]
-    pub fn end(self) {
-        // drop
-    }
-}
-
-impl<F: FnMut(&str)> Drop for PushLossyDecoder<F> {
-    #[inline]
-    fn drop(&mut self) {
-        if let Some(piece) = self.decoder.end() {
-            (self.push_str)(&piece)
-        }
-    }
-}
-
-
 pub struct Decoder {
     incomplete_sequence: IncompleteSequence,
     has_undecoded_input: bool,
@@ -70,11 +34,10 @@ impl Decoder {
         }
     }
 
-    pub fn end(&mut self) -> Option<DecodedPiece<'static>> {
+    pub fn end(self) -> Option<DecodedPiece<'static>> {
         assert!(!self.has_undecoded_input, "The previous `utf8::ChunkDecoder` must be consumed \
                 before `utf8::Decoder::end` can be called.");
         if self.incomplete_sequence.len > 0 {
-            self.incomplete_sequence.len = 0;
             Some(DecodedPiece::Error)
         } else {
             None
