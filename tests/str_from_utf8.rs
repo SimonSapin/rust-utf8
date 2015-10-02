@@ -1,14 +1,34 @@
 extern crate utf8;
 
-use utf8::{decode_step, DecodeStepStatus};
+use utf8::{Decoder, DecodedPiece};
 
 /// A re-implementation of std::str::from_utf8
 pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {
-    let (s, status) = decode_step(input);
-    match status {
-        DecodeStepStatus::Ok => Ok(s),
-        DecodeStepStatus::Incomplete(_) |
-        DecodeStepStatus::Error { .. } => Err(s.len()),
+    let mut decoder = Decoder::new();
+    let mut iter = decoder.feed(input);
+    match iter.next() {
+        Some(DecodedPiece::InputSlice(s)) => {
+//            match iter.next() {
+//                Some(DecodedPiece::InputSlice(_)) |
+//                Some(DecodedPiece::AcrossChunks(_)) => unreachable!(),
+//                Some(DecodedPiece::Error) => Err(s.len()),
+//                None => Ok(s)
+//            }
+            if iter.eof() {
+                Ok(s)
+            } else {
+                Err(s.len())
+            }
+        }
+        Some(DecodedPiece::AcrossChunks(_)) => unreachable!(),
+        Some(DecodedPiece::Error) => Err(0),
+        None => {
+            if iter.eof() {
+                Ok("")
+            } else {
+                Err(0)
+            }
+        }
     }
 }
 

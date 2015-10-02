@@ -8,7 +8,7 @@ pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
 pub struct PushLossyDecoder<F: FnMut(&str)> {
     push_str: F,
-    incomplete_sequence: Option<IncompleteSequence>,
+    decoder: Decoder,
 }
 
 impl<F: FnMut(&str)> PushLossyDecoder<F> {
@@ -16,41 +16,13 @@ impl<F: FnMut(&str)> PushLossyDecoder<F> {
     pub fn new(push_str: F) -> Self {
         PushLossyDecoder {
             push_str: push_str,
-            incomplete_sequence: None,
+            decoder: Decoder::new(),
         }
     }
 
-    pub fn feed(&mut self, mut input: &[u8]) {
-        if let Some(incomplete_sequence) = self.incomplete_sequence.take() {
-            match incomplete_sequence.complete(input) {
-                CompleteResult::Ok { code_point, remaining_input } => {
-                    (self.push_str)(&code_point);
-                    input = remaining_input
-                }
-                CompleteResult::Error { remaining_input_after_error } => {
-                    (self.push_str)(REPLACEMENT_CHARACTER);
-                    input = remaining_input_after_error
-                }
-                CompleteResult::StillIncomplete(incomplete_sequence) => {
-                    self.incomplete_sequence = Some(incomplete_sequence);
-                    return
-                }
-            }
-        }
-        loop {
-            let (s, status) = decode_step(input);
-            (self.push_str)(s);
-            match status {
-                DecodeStepStatus::Ok => break,
-                DecodeStepStatus::Incomplete(incomplete_sequence) => {
-                    self.incomplete_sequence = Some(incomplete_sequence);
-                    break
-                }
-                DecodeStepStatus::Error { remaining_input_after_error } => {
-                    (self.push_str)(REPLACEMENT_CHARACTER);
-                    input = remaining_input_after_error
-                }
-            }
+    pub fn feed(&mut self, input: &[u8]) {
+        for piece in self.decoder.feed(input) {
+            (self.push_str)(&piece);
         }
     }
 
@@ -63,8 +35,130 @@ impl<F: FnMut(&str)> PushLossyDecoder<F> {
 impl<F: FnMut(&str)> Drop for PushLossyDecoder<F> {
     #[inline]
     fn drop(&mut self) {
-        if self.incomplete_sequence.is_some() {
-            (self.push_str)(REPLACEMENT_CHARACTER)
+        if let Some(piece) = self.decoder.end() {
+            (self.push_str)(&piece)
+        }
+    }
+}
+
+
+pub struct Decoder {
+    incomplete_sequence: IncompleteSequence,
+    has_undecoded_input: bool,
+}
+
+impl Decoder {
+    pub fn new() -> Decoder {
+        Decoder {
+            has_undecoded_input: false,
+            incomplete_sequence: IncompleteSequence {
+                len: 0,
+                first: 0,
+                second: 0,
+                third: 0,
+            }
+        }
+    }
+
+    pub fn feed<'d, 'i>(&'d mut self, input_chunk: &'i [u8]) -> ChunkDecoder<'d, 'i> {
+        assert!(!self.has_undecoded_input, "The previous `utf8::ChunkDecoder` must be consumed \
+                before `utf8::Decoder::feed` can be called again.");
+        self.has_undecoded_input = !input_chunk.is_empty();
+        ChunkDecoder {
+            decoder: self,
+            input_chunk: input_chunk,
+        }
+    }
+
+    pub fn end(&mut self) -> Option<DecodedPiece<'static>> {
+        assert!(!self.has_undecoded_input, "The previous `utf8::ChunkDecoder` must be consumed \
+                before `utf8::Decoder::end` can be called.");
+        if self.incomplete_sequence.len > 0 {
+            self.incomplete_sequence.len = 0;
+            Some(DecodedPiece::Error)
+        } else {
+            None
+        }
+    }
+}
+
+
+pub struct ChunkDecoder<'d, 'i> {
+    decoder: &'d mut Decoder,
+    input_chunk: &'i [u8],
+}
+
+impl<'d, 'i> ChunkDecoder<'d, 'i> {
+    pub fn eof(&self) -> bool {
+        self.input_chunk.is_empty() && self.decoder.incomplete_sequence.len == 0
+    }
+}
+
+impl<'d, 'i> Iterator for ChunkDecoder<'d, 'i> {
+    type Item = DecodedPiece<'i>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result;
+        if self.input_chunk.is_empty() {
+            result = None
+        } else if self.decoder.incomplete_sequence.len > 0 {
+            match self.decoder.incomplete_sequence.complete(self.input_chunk) {
+                CompleteResult::Ok { code_point, remaining_input } => {
+                    result = Some(DecodedPiece::AcrossChunks(code_point));
+                    self.input_chunk = remaining_input
+                }
+                CompleteResult::Error { remaining_input_after_error } => {
+                    result = Some(DecodedPiece::Error);
+                    self.input_chunk = remaining_input_after_error
+                }
+                CompleteResult::StillIncomplete => {
+                    result = None;
+                    self.input_chunk = &[];
+                }
+            }
+        } else {
+            let (s, status) = decode_step(self.input_chunk);
+            if !s.is_empty() {
+                self.input_chunk = &self.input_chunk[s.len()..];
+                result = Some(DecodedPiece::InputSlice(s))
+            } else {
+                match status {
+                    DecodeStepStatus::Ok => {
+                        self.input_chunk = &[];
+                        result = None
+                    }
+                    DecodeStepStatus::Incomplete(incomplete_sequence) => {
+                        self.decoder.incomplete_sequence = incomplete_sequence;
+                        self.input_chunk = &[];
+                        result = None
+                    }
+                    DecodeStepStatus::Error { remaining_input_after_error } => {
+                        self.input_chunk = remaining_input_after_error;
+                        result = Some(DecodedPiece::Error)
+                    }
+                }
+            }
+        }
+        self.decoder.has_undecoded_input = !self.input_chunk.is_empty();
+        result
+    }
+}
+
+pub enum DecodedPiece<'a> {
+    InputSlice(&'a str),
+    AcrossChunks(StrChar),
+    Error,
+}
+
+impl<'a> Deref for DecodedPiece<'a> {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &str {
+        match *self {
+            DecodedPiece::InputSlice(slice) => slice,
+            DecodedPiece::AcrossChunks(ref ch) => ch,
+            DecodedPiece::Error => REPLACEMENT_CHARACTER,
         }
     }
 }
@@ -73,7 +167,7 @@ impl<F: FnMut(&str)> Drop for PushLossyDecoder<F> {
 ///
 /// Return the (possibly empty) str slice for the prefix of `input` that was well-formed UTF-8,
 /// and details about the rest of the input.
-pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
+fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
     let mut position = 0;
     loop {
         let first = match input.get(position) {
@@ -180,7 +274,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
 
 #[must_use]
 #[derive(Debug)]
-pub enum DecodeStepStatus<'a> {
+enum DecodeStepStatus<'a> {
     /// The input was entirely well-formed
     Ok,
 
@@ -195,7 +289,7 @@ pub enum DecodeStepStatus<'a> {
 }
 
 #[derive(Debug)]
-pub struct IncompleteSequence {
+struct IncompleteSequence {
     len: u8,
     first: u8,
     second: u8,
@@ -204,7 +298,7 @@ pub struct IncompleteSequence {
 
 impl IncompleteSequence {
     /// Consume more input to attempt to make this incomplete sequence complete.
-    pub fn complete(mut self, input: &[u8]) -> CompleteResult {
+    pub fn complete<'a>(&mut self, input: &'a [u8]) -> CompleteResult<'a> {
         let width = width(self.first);
         debug_assert!(0 < self.len && self.len < width && width <= 4);
 
@@ -217,7 +311,7 @@ impl IncompleteSequence {
                         let new_len = self.len + position as u8;
                         debug_assert!(new_len < 4);
                         self.len = new_len;
-                        return CompleteResult::StillIncomplete(self)
+                        return CompleteResult::StillIncomplete
                     }
                 }
             }
@@ -226,6 +320,7 @@ impl IncompleteSequence {
         macro_rules! check {
             ($valid: expr) => {
                 if !$valid {
+                    self.len = 0;
                     return CompleteResult::Error { remaining_input_after_error: &input[position..] }
                 }
             }
@@ -259,6 +354,7 @@ impl IncompleteSequence {
             }
         }
 
+        self.len = 0;
         let ch = StrChar { bytes: [self.first, self.second, self.third, fourth] };
         CompleteResult::Ok { code_point: ch, remaining_input: &input[position..] }
     }
@@ -277,7 +373,7 @@ pub enum CompleteResult<'a> {
     /// This can only happen if the `input` argument to `IncompleteSequence::complete`
     /// is less than three bytes.
     /// If at the end of the input, this is a decoding error.
-    StillIncomplete(IncompleteSequence),
+    StillIncomplete,
 }
 
 /// Like `char`, but represented in memory as UTF-8

@@ -1,38 +1,30 @@
 extern crate utf8;
 
 use std::borrow::Cow;
-use utf8::{decode_step, DecodeStepStatus, REPLACEMENT_CHARACTER};
+use utf8::{Decoder, DecodedPiece};
 
 #[path = "shared/data.rs"]
 mod data;
 
 /// A re-implementation of String::from_utf8_lossy
 pub fn string_from_utf8_lossy(input: &[u8]) -> Cow<str> {
-    // The first step is special: we want to return Cow::Borrowed if possible.
-    let (s, status) = decode_step(input);
-    let mut remaining = match status {
-        DecodeStepStatus::Ok => return s.into(),
-        DecodeStepStatus::Incomplete(_) => None,
-        DecodeStepStatus::Error { remaining_input_after_error } => {
-            Some(remaining_input_after_error)
-        }
-    };
-    let mut string = s.to_owned();
-    loop {
-        string.push_str(REPLACEMENT_CHARACTER);
-        if let Some(input) = remaining {
-            let (s, status) = decode_step(input);
-            string.push_str(s);
-            remaining = match status {
-                DecodeStepStatus::Ok => break,
-                DecodeStepStatus::Incomplete(_) => None,
-                DecodeStepStatus::Error { remaining_input_after_error } => {
-                    Some(remaining_input_after_error)
-                }
-            };
-        } else {
-            break
-        }
+    let mut decoder = Decoder::new();
+    let mut iter = decoder.feed(input);
+    // The first piece is special: we want to return Cow::Borrowed if possible.
+    let first = iter.next();
+    let second = iter.next();
+    if let (&Some(DecodedPiece::InputSlice(s)), &None) = (&first, &second) {
+        return (*s).into()
+    }
+    let mut string = String::new();
+    if let Some(ref first) = first {
+        string.push_str(first)
+    }
+    if let Some(ref second) = second {
+        string.push_str(second)
+    }
+    for piece in iter {
+        string.push_str(&piece)
     }
     string.into()
 }
