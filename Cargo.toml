@@ -1,5 +1,5 @@
 [package]
-name = "utf8"
+name = "utf-8"
 version = "0.1.0"
 authors = ["Simon Sapin <simon.sapin@exyr.org>"]
 description = "Incremental, zero-copy UTF-8 decoding with error handling"
