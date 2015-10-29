@@ -1,6 +1,6 @@
 extern crate utf8;
 
-use utf8::Decoder;
+use utf8::PushLossyDecoder;
 
 #[path = "shared/data.rs"]
 mod data;
@@ -19,14 +19,12 @@ fn test_incremental_decoder() {
 fn all_partitions<'a>(chunks: &mut Vec<&'a [u8]>, input: &'a [u8], expected: &str) {
     if input.is_empty() {
         let mut string = String::new();
-        let mut decoder = Decoder::new();
-        for &chunk in &*chunks {
-            for piece in decoder.feed(chunk) {
-                string.push_str(&piece)
+        {
+            let mut decoder = PushLossyDecoder::new(|s| string.push_str(s));
+            for &chunk in &*chunks {
+                decoder.feed(chunk);
             }
-        }
-        if let Some(piece) = decoder.end() {
-            string.push_str(&piece)
+            decoder.end();
         }
         assert_eq!(string, expected);
     }

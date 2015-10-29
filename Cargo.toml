@@ -13,6 +13,7 @@ bench = false
 
 [dependencies]
 matches = "0.1.2"
+string-wrapper = "0.1.0"
 
 [profile.test]
 opt-level = 3
