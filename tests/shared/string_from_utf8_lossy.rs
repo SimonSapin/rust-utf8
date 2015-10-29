@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use utf_8::{decode_step, DecodeStepStatus, REPLACEMENT_CHARACTER};
+use utf8::{decode_step, DecodeStepStatus, REPLACEMENT_CHARACTER};
 
 /// A re-implementation of String::from_utf8_lossy
 pub fn string_from_utf8_lossy(input: &[u8]) -> Cow<str> {

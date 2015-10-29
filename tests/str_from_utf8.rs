@@ -1,6 +1,6 @@
-extern crate utf_8;
+extern crate utf8;
 
-use utf_8::{decode_step, DecodeStepStatus};
+use utf8::{decode_step, DecodeStepStatus};
 
 /// A re-implementation of std::str::from_utf8
 pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {

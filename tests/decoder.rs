@@ -1,6 +1,6 @@
-extern crate utf_8;
+extern crate utf8;
 
-use utf_8::PushLossyDecoder;
+use utf8::PushLossyDecoder;
 
 #[path = "shared/data.rs"]
 mod data;

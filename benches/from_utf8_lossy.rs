@@ -1,7 +1,7 @@
 #![feature(test, iter_arith)]
 
 extern crate test;
-extern crate utf_8;
+extern crate utf8;
 
 #[path = "../tests/shared/data.rs"]
 mod data;

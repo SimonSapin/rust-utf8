@@ -1,4 +1,4 @@
-extern crate utf_8;
+extern crate utf8;
 
 #[path = "shared/data.rs"]
 mod data;
