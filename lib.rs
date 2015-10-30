@@ -7,6 +7,8 @@ use string_wrapper::StringWrapper;
 /// The replacement character. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
+/// A push-based, lossy decoder for UTF-8.
+/// Errors are replaced with the U+FFFD replacement character.
 pub struct LossyDecoder<F: FnMut(&str)> {
     push_str: F,
     incomplete_sequence: Option<IncompleteSequence>,
@@ -21,18 +23,22 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
         }
     }
 
+    /// Feed more bytes into the decoder.
+    ///
+    /// If the UTF-8 byte sequence for one code point was split into this bytes chunk
+    /// and previous bytes chunks, it will be correctly pieced back together.
     pub fn feed(&mut self, input: &[u8]) {
-        let mut result = if let Some(seq) = self.incomplete_sequence.take() {
-            let (ch, s, status) = seq.complete(input);
+        let mut returned = if let Some(seq) = self.incomplete_sequence.take() {
+            let (ch, s, result) = seq.complete(input);
             (self.push_str)(&ch);
-            (s, status)
+            (s, result)
         } else {
             decode_step(input)
         };
         loop {
-            let (s, status) = result;
+            let (s, result) = returned;
             (self.push_str)(s);
-            match status {
+            match result {
                 Result::Ok => break,
                 Result::Incomplete(incomplete_sequence) => {
                     self.incomplete_sequence = Some(incomplete_sequence);
@@ -40,12 +46,16 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
                 }
                 Result::Error { remaining_input_after_error } => {
                     (self.push_str)(REPLACEMENT_CHARACTER);
-                    result = decode_step(remaining_input_after_error);
+                    returned = decode_step(remaining_input_after_error);
                 }
             }
         }
     }
 
+    /// Signale the end of the input.
+    ///
+    /// If the last byte chunk ended with an incomplete byte sequence for a code point,
+    /// this is an error and a replacement character is emitted.
     #[inline]
     pub fn end(self) {
         // drop
@@ -182,6 +192,7 @@ pub enum Result<'a> {
     Incomplete(IncompleteSequence),
 }
 
+/// An incomplete UTF-8 byte sequence for a code point. See `Result::Incomplete`.
 #[derive(Debug, Copy, Clone)]
 pub struct IncompleteSequence {
     len: u8,
@@ -192,6 +203,15 @@ pub struct IncompleteSequence {
 
 impl IncompleteSequence {
     /// Try to complete an incomplete sequence.
+    ///
+    /// This should be called instead of `decode_step` whenever an `IncompleteSequence`
+    /// was returned.
+    ///
+    /// The first element of the returned tuple dereferences to `&str`
+    /// and is either empty or contains a single code point pieced back together
+    /// across chunks.
+    ///
+    /// The rest of the tuple is the same as in `decode_step`.
     pub fn complete(mut self, input: &[u8]) -> (StringWrapper<[u8; 4]>, &str, Result) {
         let width = width(self.first);
         debug_assert!(0 < self.len && self.len < width && width <= 4);
@@ -261,8 +281,8 @@ impl IncompleteSequence {
                 width as usize,
             )
         };
-        let (decoded, status) = decode_step(&input[position..]);
-        (ch, decoded, status)
+        let (decoded, result) = decode_step(&input[position..]);
+        (ch, decoded, result)
     }
 }
 

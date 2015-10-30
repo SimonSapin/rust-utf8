@@ -4,8 +4,8 @@ use utf8::decode_step;
 
 /// A re-implementation of std::str::from_utf8
 pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {
-    let (s, status) = decode_step(input);
-    match status {
+    let (s, result) = decode_step(input);
+    match result {
         utf8::Result::Ok => return Ok(s),
         utf8::Result::Error { .. } | utf8::Result::Incomplete(_) => Err(s.len()),
     }
