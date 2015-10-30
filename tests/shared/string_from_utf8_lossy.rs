@@ -1,13 +1,13 @@
 use std::borrow::Cow;
-use utf8::{decode_step, DecodeStepStatus, REPLACEMENT_CHARACTER};
+use utf8::{decode_step, Result, REPLACEMENT_CHARACTER};
 
 /// A re-implementation of String::from_utf8_lossy
 pub fn string_from_utf8_lossy(input: &[u8]) -> Cow<str> {
     let (s, status) = decode_step(input);
     let mut remaining = match status {
-        DecodeStepStatus::Ok => return s.into(),
-        DecodeStepStatus::Error { remaining_input_after_error: r } => Some(r),
-        DecodeStepStatus::Incomplete(_) => None,
+        Result::Ok => return s.into(),
+        Result::Error { remaining_input_after_error: r } => Some(r),
+        Result::Incomplete(_) => None,
     };
     let mut string = String::from(s);
     loop {
@@ -16,9 +16,9 @@ pub fn string_from_utf8_lossy(input: &[u8]) -> Cow<str> {
             let (s, status) = decode_step(r);
             string.push_str(s);
             remaining = match status {
-                DecodeStepStatus::Ok => break,
-                DecodeStepStatus::Error { remaining_input_after_error: r } => Some(r),
-                DecodeStepStatus::Incomplete(_) => None,
+                Result::Ok => break,
+                Result::Error { remaining_input_after_error: r } => Some(r),
+                Result::Incomplete(_) => None,
             };
         } else {
             break

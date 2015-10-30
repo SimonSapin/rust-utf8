@@ -33,12 +33,12 @@ impl<F: FnMut(&str)> PushLossyDecoder<F> {
             let (s, status) = result;
             (self.push_str)(s);
             match status {
-                DecodeStepStatus::Ok => break,
-                DecodeStepStatus::Incomplete(incomplete_sequence) => {
+                Result::Ok => break,
+                Result::Incomplete(incomplete_sequence) => {
                     self.incomplete_sequence = Some(incomplete_sequence);
                     break
                 }
-                DecodeStepStatus::Error { remaining_input_after_error } => {
+                Result::Error { remaining_input_after_error } => {
                     (self.push_str)(REPLACEMENT_CHARACTER);
                     result = decode_step(remaining_input_after_error);
                 }
@@ -65,7 +65,7 @@ impl<F: FnMut(&str)> Drop for PushLossyDecoder<F> {
 ///
 /// Return the (possibly empty) str slice for the prefix of `input` that is well-formed UTF-8,
 /// and details about the rest of the input.
-pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
+pub fn decode_step(input: &[u8]) -> (&str, Result) {
     let mut position = 0;
     loop {
         let first = match input.get(position) {
@@ -76,7 +76,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                 unsafe {
                     str::from_utf8_unchecked(input)
                 },
-                DecodeStepStatus::Ok,
+                Result::Ok,
             )
         };
         // ASCII characters are always valid, so only large
@@ -98,7 +98,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                         Some(&b) => b,
                         None => return (
                             valid_prefix!(),
-                            DecodeStepStatus::Incomplete(IncompleteSequence {
+                            Result::Incomplete(IncompleteSequence {
                                 len: $current_sequence_len,
                                 first: $first,
                                 second: $second,
@@ -114,7 +114,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
                     if !$valid {
                         return (
                             valid_prefix!(),
-                            DecodeStepStatus::Error {
+                            Result::Error {
                                 remaining_input_after_error:
                                     &input[position + $current_sequence_len..]
                             }
@@ -168,7 +168,7 @@ pub fn decode_step(input: &[u8]) -> (&str, DecodeStepStatus) {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum DecodeStepStatus<'a> {
+pub enum Result<'a> {
     /// The input is entirely well-formed
     Ok,
 
@@ -192,7 +192,7 @@ pub struct IncompleteSequence {
 
 impl IncompleteSequence {
     /// Try to complete an incomplete sequence.
-    pub fn complete(mut self, input: &[u8]) -> (StringWrapper<[u8; 4]>, &str, DecodeStepStatus) {
+    pub fn complete(mut self, input: &[u8]) -> (StringWrapper<[u8; 4]>, &str, Result) {
         let width = width(self.first);
         debug_assert!(0 < self.len && self.len < width && width <= 4);
 
@@ -208,7 +208,7 @@ impl IncompleteSequence {
                         return (
                             StringWrapper::new([0, 0, 0, 0]),
                             "",
-                            DecodeStepStatus::Incomplete(self),
+                            Result::Incomplete(self),
                         )
                     }
                 }
@@ -221,7 +221,7 @@ impl IncompleteSequence {
                     return (
                         StringWrapper::new([0, 0, 0, 0]),
                         "",
-                        DecodeStepStatus::Error { remaining_input_after_error: &input[position..] },
+                        Result::Error { remaining_input_after_error: &input[position..] },
                     )
                 }
             }
