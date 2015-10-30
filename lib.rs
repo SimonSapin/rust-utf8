@@ -1,178 +1,164 @@
 #[macro_use] extern crate matches;
 extern crate string_wrapper;
 
+use std::result;
 use std::str;
 use string_wrapper::StringWrapper;
 
 /// The replacement character. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
-/// A push-based, lossy decoder for UTF-8.
-/// Errors are replaced with the U+FFFD replacement character.
-pub struct LossyDecoder<F: FnMut(&str)> {
-    push_str: F,
-    incomplete_sequence: Option<IncompleteSequence>,
-}
-
-impl<F: FnMut(&str)> LossyDecoder<F> {
-    #[inline]
-    pub fn new(push_str: F) -> Self {
-        LossyDecoder {
-            push_str: push_str,
-            incomplete_sequence: None,
-        }
-    }
-
-    /// Feed more bytes into the decoder.
-    ///
-    /// If the UTF-8 byte sequence for one code point was split into this bytes chunk
-    /// and previous bytes chunks, it will be correctly pieced back together.
-    pub fn feed(&mut self, input: &[u8]) {
-        let mut returned = if let Some(seq) = self.incomplete_sequence.take() {
-            let (ch, s, result) = seq.complete(input);
-            (self.push_str)(&ch);
-            (s, result)
-        } else {
-            decode_step(input)
-        };
-        loop {
-            let (s, result) = returned;
-            (self.push_str)(s);
-            match result {
-                Result::Ok => break,
-                Result::Incomplete(incomplete_sequence) => {
-                    self.incomplete_sequence = Some(incomplete_sequence);
-                    break
-                }
-                Result::Error { remaining_input_after_error } => {
-                    (self.push_str)(REPLACEMENT_CHARACTER);
-                    returned = decode_step(remaining_input_after_error);
-                }
-            }
-        }
-    }
-
-    /// Signale the end of the input.
-    ///
-    /// If the last byte chunk ended with an incomplete byte sequence for a code point,
-    /// this is an error and a replacement character is emitted.
-    #[inline]
-    pub fn end(self) {
-        // drop
-    }
-}
-
-impl<F: FnMut(&str)> Drop for LossyDecoder<F> {
-    #[inline]
-    fn drop(&mut self) {
-        if self.incomplete_sequence.is_some() {
-            (self.push_str)(REPLACEMENT_CHARACTER)
-        }
-    }
-}
-
-/// Low-level UTF-8 decoding.
+/// A low-level, zero-copy UTF-8 decoder with error handling.
 ///
-/// Return the (possibly empty) str slice for the prefix of `input` that is well-formed UTF-8,
-/// and details about the rest of the input.
-pub fn decode_step(input: &[u8]) -> (&str, Result) {
-    let mut position = 0;
-    loop {
-        let first = match input.get(position) {
-            Some(&b) => b,
-            // we're at the end of the input and a codepoint
-            // boundary at the same time, so this string is valid.
-            None => return (
-                unsafe {
-                    str::from_utf8_unchecked(input)
-                },
-                Result::Ok,
-            )
+/// This decoder can process input one chunk at a time,
+/// returns `&str` Unicode slices into the given `&[u8]` bytes input,
+/// and stops at each error to let the caller deal with it however they choose.
+pub struct Decoder {
+    incomplete_sequence: IncompleteSequence,
+}
+
+/// `len == 0` means no sequence
+struct IncompleteSequence {
+    len: u8,
+    first: u8,
+    second: u8,
+    third: u8,
+}
+
+impl Decoder {
+    pub fn new() -> Decoder {
+        Decoder {
+            incomplete_sequence: IncompleteSequence {
+                len: 0,
+                first: 0,
+                second: 0,
+                third: 0,
+            }
+        }
+    }
+
+    /// Return whether the input of the last call to `.decode()` ended with an incomplete
+    /// UTF-8 sequence for a code point.
+    /// If this is true and there is no more input, this is a decoding error.
+    pub fn has_incomplete_sequence(&self) -> bool {
+        self.incomplete_sequence.len > 0
+    }
+
+    /// Start decoding one chunk of input bytes. The return value is a tuple of:
+    ///
+    /// * An inline buffer of up to 4 bytes that dereferences to `&str`.
+    ///   When the length is non-zero,
+    ///   it represents a single code point that was re-assembled from multiple input chunks.
+    /// * The Unicode slice of at the start of the input bytes chunk that is well-formed UTF-8.
+    ///   May be empty, for example when a decoding error occurs immediately after another.
+    /// * Details about the rest of the input chuck. See the documentation of the `Result` enum.
+    pub fn decode<'a>(&mut self, input_chunk: &'a [u8])
+                      -> (StringWrapper<[u8; 4]>, &'a str, Result<'a>) {
+        let (ch, input) = match self.incomplete_sequence.complete(input_chunk) {
+            Ok(tuple) => tuple,
+            Err(result) => return (StringWrapper::new([0, 0, 0, 0]), "", result)
         };
-        // ASCII characters are always valid, so only large
-        // bytes need more examination.
-        if first < 128 {
-            position += 1
-        } else {
-            macro_rules! valid_prefix {
-                () => {
+
+        let mut position = 0;
+        loop {
+            let first = match input.get(position) {
+                Some(&b) => b,
+                // we're at the end of the input and a codepoint
+                // boundary at the same time, so this string is valid.
+                None => return (
+                    ch,
                     unsafe {
-                        str::from_utf8_unchecked(&input[..position])
-                    }
-                }
-            }
-
-            macro_rules! next {
-                ($current_sequence_len: expr, $first: expr, $second: expr, $third: expr) => {
-                    match input.get(position + $current_sequence_len) {
-                        Some(&b) => b,
-                        None => return (
-                            valid_prefix!(),
-                            Result::Incomplete(IncompleteSequence {
-                                len: $current_sequence_len,
-                                first: $first,
-                                second: $second,
-                                third: $third,
-                            }),
-                        )
-                    }
-                }
-            }
-
-            macro_rules! check {
-                ($valid: expr, $current_sequence_len: expr) => {
-                    if !$valid {
-                        return (
-                            valid_prefix!(),
-                            Result::Error {
-                                remaining_input_after_error:
-                                    &input[position + $current_sequence_len..]
-                            }
-                        )
-
-                    }
-                }
-            }
-
-            // 2-byte encoding is for codepoints  \u{0080} to  \u{07ff}
-            //        first  C2 80        last DF BF
-            // 3-byte encoding is for codepoints  \u{0800} to  \u{ffff}
-            //        first  E0 A0 80     last EF BF BF
-            //   excluding surrogates codepoints  \u{d800} to  \u{dfff}
-            //               ED A0 80 to       ED BF BF
-            // 4-byte encoding is for codepoints \u{1000}0 to \u{10ff}ff
-            //        first  F0 90 80 80  last F4 8F BF BF
-            //
-            // Use the UTF-8 syntax from the RFC
-            //
-            // https://tools.ietf.org/html/rfc3629
-            // UTF8-1      = %x00-7F
-            // UTF8-2      = %xC2-DF UTF8-tail
-            // UTF8-3      = %xE0 %xA0-BF UTF8-tail / %xE1-EC 2( UTF8-tail ) /
-            //               %xED %x80-9F UTF8-tail / %xEE-EF 2( UTF8-tail )
-            // UTF8-4      = %xF0 %x90-BF 2( UTF8-tail ) / %xF1-F3 3( UTF8-tail ) /
-            //               %xF4 %x80-8F 2( UTF8-tail )
-            let width = UTF8_CHAR_WIDTH[first as usize];
-            check!(width != 0, 1);
-            let second = next!(1, first, 0, 0);
-            let valid = match width {
-                2 => is_continuation_byte(second),
-                3 => valid_three_bytes_sequence_prefix(first, second),
-                _ => {
-                    debug_assert!(width == 4);
-                    valid_four_bytes_sequence_prefix(first, second)
-                }
+                        str::from_utf8_unchecked(input)
+                    },
+                    Result::Ok,
+                )
             };
-            check!(valid, 1);
-            if width > 2 {
-                let third = next!(2, first, second, 0);
-                check!(is_continuation_byte(third), 2);
-                if width > 3 {
-                    let fourth = next!(3, first, second, third);
-                    check!(is_continuation_byte(fourth), 3);
+            // ASCII characters are always valid, so only large
+            // bytes need more examination.
+            if first < 128 {
+                position += 1
+            } else {
+                macro_rules! valid_prefix {
+                    () => {
+                        unsafe {
+                            str::from_utf8_unchecked(&input[..position])
+                        }
+                    }
                 }
+
+                macro_rules! next {
+                    ($current_sequence_len: expr, $first: expr, $second: expr, $third: expr) => {
+                        match input.get(position + $current_sequence_len) {
+                            Some(&b) => b,
+                            None => {
+                                self.incomplete_sequence = IncompleteSequence {
+                                    len: $current_sequence_len,
+                                    first: $first,
+                                    second: $second,
+                                    third: $third,
+                                };
+                                return (ch, valid_prefix!(), Result::Incomplete)
+                            }
+                        }
+                    }
+                }
+
+                macro_rules! check {
+                    ($valid: expr, $current_sequence_len: expr) => {
+                        if !$valid {
+                            return (
+                                ch,
+                                valid_prefix!(),
+                                Result::Error {
+                                    remaining_input_after_error:
+                                        &input[position + $current_sequence_len..]
+                                }
+                            )
+
+                        }
+                    }
+                }
+
+                // 2-byte encoding is for codepoints  \u{0080} to  \u{07ff}
+                //        first  C2 80        last DF BF
+                // 3-byte encoding is for codepoints  \u{0800} to  \u{ffff}
+                //        first  E0 A0 80     last EF BF BF
+                //   excluding surrogates codepoints  \u{d800} to  \u{dfff}
+                //               ED A0 80 to       ED BF BF
+                // 4-byte encoding is for codepoints \u{1000}0 to \u{10ff}ff
+                //        first  F0 90 80 80  last F4 8F BF BF
+                //
+                // Use the UTF-8 syntax from the RFC
+                //
+                // https://tools.ietf.org/html/rfc3629
+                // UTF8-1      = %x00-7F
+                // UTF8-2      = %xC2-DF UTF8-tail
+                // UTF8-3      = %xE0 %xA0-BF UTF8-tail / %xE1-EC 2( UTF8-tail ) /
+                //               %xED %x80-9F UTF8-tail / %xEE-EF 2( UTF8-tail )
+                // UTF8-4      = %xF0 %x90-BF 2( UTF8-tail ) / %xF1-F3 3( UTF8-tail ) /
+                //               %xF4 %x80-8F 2( UTF8-tail )
+                let width = UTF8_CHAR_WIDTH[first as usize];
+                check!(width != 0, 1);
+                let second = next!(1, first, 0, 0);
+                let valid = match width {
+                    2 => is_continuation_byte(second),
+                    3 => valid_three_bytes_sequence_prefix(first, second),
+                    _ => {
+                        debug_assert!(width == 4);
+                        valid_four_bytes_sequence_prefix(first, second)
+                    }
+                };
+                check!(valid, 1);
+                if width > 2 {
+                    let third = next!(2, first, second, 0);
+                    check!(is_continuation_byte(third), 2);
+                    if width > 3 {
+                        let fourth = next!(3, first, second, third);
+                        check!(is_continuation_byte(fourth), 3);
+                    }
+                }
+                position += width as usize;
             }
-            position += width as usize;
         }
     }
 }
@@ -189,30 +175,15 @@ pub enum Result<'a> {
     /// The end of the input was reached in the middle of an UTF-8 sequence that is valid so far.
     /// More input (up to 3 more bytes) is required to determine if it is well-formed.
     /// If at the end of the input, this is a decoding error.
-    Incomplete(IncompleteSequence),
-}
-
-/// An incomplete UTF-8 byte sequence for a code point. See `Result::Incomplete`.
-#[derive(Debug, Copy, Clone)]
-pub struct IncompleteSequence {
-    len: u8,
-    first: u8,
-    second: u8,
-    third: u8,
+    Incomplete,
 }
 
 impl IncompleteSequence {
-    /// Try to complete an incomplete sequence.
-    ///
-    /// This should be called instead of `decode_step` whenever an `IncompleteSequence`
-    /// was returned.
-    ///
-    /// The first element of the returned tuple dereferences to `&str`
-    /// and is either empty or contains a single code point pieced back together
-    /// across chunks.
-    ///
-    /// The rest of the tuple is the same as in `decode_step`.
-    pub fn complete(mut self, input: &[u8]) -> (StringWrapper<[u8; 4]>, &str, Result) {
+    fn complete<'a>(&mut self, input: &'a [u8])
+                    -> result::Result<(StringWrapper<[u8; 4]>, &'a [u8]), Result<'a>> {
+        if self.len == 0 {
+            return Ok((StringWrapper::new([0, 0, 0, 0]), input))
+        }
         let width = width(self.first);
         debug_assert!(0 < self.len && self.len < width && width <= 4);
 
@@ -225,11 +196,7 @@ impl IncompleteSequence {
                         let new_len = self.len + position as u8;
                         debug_assert!(new_len < 4);
                         self.len = new_len;
-                        return (
-                            StringWrapper::new([0, 0, 0, 0]),
-                            "",
-                            Result::Incomplete(self),
-                        )
+                        return Err(Result::Incomplete)
                     }
                 }
             }
@@ -238,11 +205,8 @@ impl IncompleteSequence {
         macro_rules! check {
             ($valid: expr) => {
                 if !$valid {
-                    return (
-                        StringWrapper::new([0, 0, 0, 0]),
-                        "",
-                        Result::Error { remaining_input_after_error: &input[position..] },
-                    )
+                    self.len = 0;
+                    return Err(Result::Error { remaining_input_after_error: &input[position..] })
                 }
             }
         }
@@ -281,8 +245,8 @@ impl IncompleteSequence {
                 width as usize,
             )
         };
-        let (decoded, result) = decode_step(&input[position..]);
-        (ch, decoded, result)
+        self.len = 0;
+        Ok((ch, &input[position..]))
     }
 }
 
@@ -337,4 +301,62 @@ fn valid_four_bytes_sequence_prefix(first: u8, second: u8) -> bool {
         (0xF1 ... 0xF3, 0x80 ... 0xBF) |
         (0xF4         , 0x80 ... 0x8F)
     )
+}
+
+/// A push-based, lossy decoder for UTF-8.
+/// Errors are replaced with the U+FFFD replacement character.
+pub struct LossyDecoder<F: FnMut(&str)> {
+    push_str: F,
+    decoder: Decoder,
+}
+
+impl<F: FnMut(&str)> LossyDecoder<F> {
+    #[inline]
+    pub fn new(push_str: F) -> Self {
+        LossyDecoder {
+            push_str: push_str,
+            decoder: Decoder::new(),
+        }
+    }
+
+    /// Feed more bytes into the decoder.
+    ///
+    /// If the UTF-8 byte sequence for one code point was split into this bytes chunk
+    /// and previous bytes chunks, it will be correctly pieced back together.
+    pub fn feed(&mut self, mut input: &[u8]) {
+        loop {
+            let (ch, s, result) = self.decoder.decode(input);
+            if !ch.is_empty() {
+                (self.push_str)(&ch);
+            }
+            if !s.is_empty() {
+                (self.push_str)(s);
+            }
+            match result {
+                Result::Ok | Result::Incomplete => break,
+                Result::Error { remaining_input_after_error: remaining } => {
+                    (self.push_str)(REPLACEMENT_CHARACTER);
+                    input = remaining;
+                }
+            }
+        }
+    }
+
+    /// Signal the end of the input.
+    ///
+    /// If the last byte chunk ended with an incomplete byte sequence for a code point,
+    /// this is an error and a replacement character is emitted.
+    #[inline]
+    pub fn end(self) {
+        // drop
+    }
+}
+
+impl<F: FnMut(&str)> Drop for LossyDecoder<F> {
+    #[inline]
+    fn drop(&mut self) {
+        if self.decoder.has_incomplete_sequence() {
+            (self.push_str)(REPLACEMENT_CHARACTER)
+        }
+    }
 }
