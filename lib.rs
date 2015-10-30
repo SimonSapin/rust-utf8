@@ -7,15 +7,15 @@ use string_wrapper::StringWrapper;
 /// The replacement character. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
-pub struct PushLossyDecoder<F: FnMut(&str)> {
+pub struct LossyDecoder<F: FnMut(&str)> {
     push_str: F,
     incomplete_sequence: Option<IncompleteSequence>,
 }
 
-impl<F: FnMut(&str)> PushLossyDecoder<F> {
+impl<F: FnMut(&str)> LossyDecoder<F> {
     #[inline]
     pub fn new(push_str: F) -> Self {
-        PushLossyDecoder {
+        LossyDecoder {
             push_str: push_str,
             incomplete_sequence: None,
         }
@@ -52,7 +52,7 @@ impl<F: FnMut(&str)> PushLossyDecoder<F> {
     }
 }
 
-impl<F: FnMut(&str)> Drop for PushLossyDecoder<F> {
+impl<F: FnMut(&str)> Drop for LossyDecoder<F> {
     #[inline]
     fn drop(&mut self) {
         if self.incomplete_sequence.is_some() {

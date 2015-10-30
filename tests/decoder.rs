@@ -1,6 +1,6 @@
 extern crate utf8;
 
-use utf8::PushLossyDecoder;
+use utf8::LossyDecoder;
 
 #[path = "shared/data.rs"]
 mod data;
@@ -20,7 +20,7 @@ fn all_partitions<'a>(chunks: &mut Vec<&'a [u8]>, input: &'a [u8], expected: &st
     if input.is_empty() {
         let mut string = String::new();
         {
-            let mut decoder = PushLossyDecoder::new(|s| string.push_str(s));
+            let mut decoder = LossyDecoder::new(|s| string.push_str(s));
             for &chunk in &*chunks {
                 decoder.feed(chunk);
             }
