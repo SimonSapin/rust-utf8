@@ -39,6 +39,8 @@ pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 ///     }
 /// }
 /// ```
+///
+/// See also [`LossyDecoder`](struct.LossyDecoder.html).
 pub struct Decoder {
     incomplete_sequence: IncompleteSequence,
 }
@@ -82,7 +84,7 @@ impl Decoder {
     /// * The Unicode slice of at the start of the input bytes chunk that is well-formed UTF-8.
     ///   May be empty, for example when a decoding error occurs immediately after another.
     /// * Details about the rest of the input chuck.
-    ///   See the documentation of [`Result`](./enum.Result.html).
+    ///   See the documentation of [`Result`](enum.Result.html).
     pub fn decode<'a>(&mut self, input_chunk: &'a [u8])
                       -> (StringWrapper<[u8; 4]>, &'a str, Result<'a>) {
         let (ch, input) = match self.incomplete_sequence.complete(input_chunk) {
@@ -342,6 +344,22 @@ fn valid_four_bytes_sequence_prefix(first: u8, second: u8) -> bool {
 /// Errors are replaced with the U+FFFD replacement character.
 ///
 /// Users “push” bytes into the decoder, which in turn “pushes” `&str` slices into a callback.
+///
+/// For example, `String::from_utf8_lossy` (but returning `String` instead of `Cow`)
+/// can be rewritten as:
+///
+/// ```rust
+/// fn string_from_utf8_lossy(input: &[u8]) -> String {
+///     let mut string = String::new();
+///     utf8::LossyDecoder::new(|s| string.push_str(s)).feed(input);
+///     string
+/// }
+/// ```
+///
+/// **Note:** Dropping the decoder signals the end of the input:
+/// If the last input chunk ended with an incomplete byte sequence for a code point,
+/// this is an error and a replacement character is emitted.
+/// Use `std::mem::forget` to inhibit this behavior.
 pub struct LossyDecoder<F: FnMut(&str)> {
     push_str: F,
     decoder: Decoder,
@@ -381,15 +399,6 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
                 }
             }
         }
-    }
-
-    /// Signal the end of the input.
-    ///
-    /// If the last byte chunk ended with an incomplete byte sequence for a code point,
-    /// this is an error and a replacement character is emitted.
-    #[inline]
-    pub fn end(self) {
-        // drop
     }
 }
 

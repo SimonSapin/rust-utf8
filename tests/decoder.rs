@@ -24,7 +24,6 @@ fn all_partitions<'a>(chunks: &mut Vec<&'a [u8]>, input: &'a [u8], expected: &st
             for &chunk in &*chunks {
                 decoder.feed(chunk);
             }
-            decoder.end();
         }
         assert_eq!(string, expected);
     }
