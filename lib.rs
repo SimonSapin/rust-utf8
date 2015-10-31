@@ -5,7 +5,7 @@ use std::result;
 use std::str;
 use string_wrapper::StringWrapper;
 
-/// The replacement character. In lossy decoding, insert it for every decoding error.
+/// The replacement character, U+FFFD. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
 /// A low-level, zero-copy UTF-8 decoder with error handling.
@@ -13,6 +13,32 @@ pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 /// This decoder can process input one chunk at a time,
 /// returns `&str` Unicode slices into the given `&[u8]` bytes input,
 /// and stops at each error to let the caller deal with it however they choose.
+///
+/// For example, `String::from_utf8_lossy` (but returning `String` instead of `Cow`)
+/// can be rewritten as:
+///
+/// ```rust
+/// fn string_from_utf8_lossy(mut input: &[u8]) -> String {
+///     let mut decoder = utf8::Decoder::new();
+///     let mut string = String::new();
+///     loop {
+///         let (reconstituted, decoded, result) = decoder.decode(input);
+///         debug_assert!(reconstituted.is_empty());  // We only have one chunk of input.
+///         string.push_str(decoded);
+///         match result {
+///             utf8::Result::Ok => return string,
+///             utf8::Result::Incomplete => {
+///                 string.push_str(utf8::REPLACEMENT_CHARACTER);
+///                 return string
+///             }
+///             utf8::Result::Error { remaining_input_after_error } => {
+///                 string.push_str(utf8::REPLACEMENT_CHARACTER);
+///                 input = remaining_input_after_error;
+///             }
+///         }
+///     }
+/// }
+/// ```
 pub struct Decoder {
     incomplete_sequence: IncompleteSequence,
 }
@@ -26,6 +52,8 @@ struct IncompleteSequence {
 }
 
 impl Decoder {
+    /// Create a new decoder.
+    #[inline]
     pub fn new() -> Decoder {
         Decoder {
             incomplete_sequence: IncompleteSequence {
@@ -37,9 +65,9 @@ impl Decoder {
         }
     }
 
-    /// Return whether the input of the last call to `.decode()` ended with an incomplete
-    /// UTF-8 sequence for a code point.
+    /// Return whether the input of the last call to `.decode()` returned `Result::Incomplete`.
     /// If this is true and there is no more input, this is a decoding error.
+    #[inline]
     pub fn has_incomplete_sequence(&self) -> bool {
         self.incomplete_sequence.len > 0
     }
@@ -47,11 +75,14 @@ impl Decoder {
     /// Start decoding one chunk of input bytes. The return value is a tuple of:
     ///
     /// * An inline buffer of up to 4 bytes that dereferences to `&str`.
-    ///   When the length is non-zero,
+    ///   When the length is non-zero
+    ///   (which can only happen when calling `Decoder::decode` with more input
+    ///   after the previous call returned `Result::Incomplete`),
     ///   it represents a single code point that was re-assembled from multiple input chunks.
     /// * The Unicode slice of at the start of the input bytes chunk that is well-formed UTF-8.
     ///   May be empty, for example when a decoding error occurs immediately after another.
-    /// * Details about the rest of the input chuck. See the documentation of the `Result` enum.
+    /// * Details about the rest of the input chuck.
+    ///   See the documentation of [`Result`](./enum.Result.html).
     pub fn decode<'a>(&mut self, input_chunk: &'a [u8])
                       -> (StringWrapper<[u8; 4]>, &'a str, Result<'a>) {
         let (ch, input) = match self.incomplete_sequence.complete(input_chunk) {
@@ -165,17 +196,21 @@ impl Decoder {
 
 #[derive(Debug, Copy, Clone)]
 pub enum Result<'a> {
-    /// The input is entirely well-formed
+    /// The input chunk is entirely well-formed.
+    /// The returned `&str` goes to its end.
     Ok,
 
-    /// There is a decoding error.
-    /// Each such error should be represented as one U+FFFD replacement character in lossy decoding.
-    Error { remaining_input_after_error: &'a [u8] },
-
-    /// The end of the input was reached in the middle of an UTF-8 sequence that is valid so far.
-    /// More input (up to 3 more bytes) is required to determine if it is well-formed.
-    /// If at the end of the input, this is a decoding error.
+    /// The end of the input chunk was reached in the middle of an UTF-8 sequence
+    /// that is valid so far.
+    /// More input (up to 3 more bytes) is required to decode that sequence.
+    /// At the end of the input, the sequence is ill-formed and this is a decoding error.
     Incomplete,
+
+    /// An ill-formed byte sequence was found. This is a decoding error.
+    /// If errors are not fatal, decoding should continue after handling the error
+    /// (typically by appending a U+FFFD replacement character to the output)
+    /// by calling `Decoder::decode` again with `remaining_input_after_error` as its argument.
+    Error { remaining_input_after_error: &'a [u8] },
 }
 
 impl IncompleteSequence {
@@ -305,12 +340,15 @@ fn valid_four_bytes_sequence_prefix(first: u8, second: u8) -> bool {
 
 /// A push-based, lossy decoder for UTF-8.
 /// Errors are replaced with the U+FFFD replacement character.
+///
+/// Users “push” bytes into the decoder, which in turn “pushes” `&str` slices into a callback.
 pub struct LossyDecoder<F: FnMut(&str)> {
     push_str: F,
     decoder: Decoder,
 }
 
 impl<F: FnMut(&str)> LossyDecoder<F> {
+    /// Create a new decoder from a callback.
     #[inline]
     pub fn new(push_str: F) -> Self {
         LossyDecoder {
@@ -319,7 +357,10 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
         }
     }
 
-    /// Feed more bytes into the decoder.
+    /// Feed one chunk of input into the decoder.
+    ///
+    /// The input is decoded lossily
+    /// and the callback called once or more with `&str` string slices.
     ///
     /// If the UTF-8 byte sequence for one code point was split into this bytes chunk
     /// and previous bytes chunks, it will be correctly pieced back together.
