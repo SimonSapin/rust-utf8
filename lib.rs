@@ -1,9 +1,8 @@
 #[macro_use] extern crate matches;
-extern crate string_wrapper;
 
+use std::ops::Deref;
 use std::result;
 use std::str;
-use string_wrapper::StringWrapper;
 
 /// The replacement character, U+FFFD. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
@@ -85,11 +84,10 @@ impl Decoder {
     ///   May be empty, for example when a decoding error occurs immediately after another.
     /// * Details about the rest of the input chuck.
     ///   See the documentation of [`Result`](enum.Result.html).
-    pub fn decode<'a>(&mut self, input_chunk: &'a [u8])
-                      -> (StringWrapper<[u8; 4]>, &'a str, Result<'a>) {
+    pub fn decode<'a>(&mut self, input_chunk: &'a [u8]) -> (InlineString, &'a str, Result<'a>) {
         let (ch, input) = match self.incomplete_sequence.complete(input_chunk) {
             Ok(tuple) => tuple,
-            Err(result) => return (StringWrapper::new([0, 0, 0, 0]), "", result)
+            Err(result) => return (InlineString::empty(), "", result)
         };
 
         let mut position = 0;
@@ -217,9 +215,9 @@ pub enum Result<'a> {
 
 impl IncompleteSequence {
     fn complete<'a>(&mut self, input: &'a [u8])
-                    -> result::Result<(StringWrapper<[u8; 4]>, &'a [u8]), Result<'a>> {
+                    -> result::Result<(InlineString, &'a [u8]), Result<'a>> {
         if self.len == 0 {
-            return Ok((StringWrapper::new([0, 0, 0, 0]), input))
+            return Ok((InlineString::empty(), input))
         }
         let width = width(self.first);
         debug_assert!(0 < self.len && self.len < width && width <= 4);
@@ -276,11 +274,9 @@ impl IncompleteSequence {
             }
         }
 
-        let ch = unsafe {
-            StringWrapper::from_raw_parts(
-                [self.first, self.second, self.third, fourth],
-                width as usize,
-            )
+        let ch = InlineString {
+            buffer: [self.first, self.second, self.third, fourth],
+            len: width,
         };
         self.len = 0;
         Ok((ch, &input[position..]))
@@ -408,5 +404,45 @@ impl<F: FnMut(&str)> Drop for LossyDecoder<F> {
         if self.decoder.has_incomplete_sequence() {
             (self.push_str)(REPLACEMENT_CHARACTER)
         }
+    }
+}
+
+/// Like `String`, but does not allocate memory and has a fixed capacity of 4 bytes.
+/// This is used by `Decoder` to represent either the empty string or a single code point.
+#[derive(Copy, Clone)]
+pub struct InlineString {
+    buffer: [u8; 4],
+    len: u8,
+}
+
+impl Deref for InlineString {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &str {
+        unsafe {
+            str::from_utf8_unchecked(&self.buffer[..self.len as usize])
+        }
+    }
+}
+
+impl InlineString {
+    fn empty() -> InlineString {
+        InlineString {
+            buffer: [0, 0, 0, 0],
+            len: 0,
+        }
+    }
+
+    // Bypass bounds check in deref()
+
+    /// Returns the length of `self`.
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    /// Returns true if this string has a length of zero bytes.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
