@@ -4,6 +4,8 @@ use std::ops::Deref;
 use std::result;
 use std::str;
 
+pub mod based_on_std;
+
 /// The replacement character, U+FFFD. In lossy decoding, insert it for every decoding error.
 pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
