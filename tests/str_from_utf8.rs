@@ -3,9 +3,9 @@ extern crate utf8;
 /// A re-implementation of std::str::from_utf8
 pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {
     match utf8::decode(input) {
-        utf8::DecodeResult::Ok(s) => return Ok(s),
-        utf8::DecodeResult::Error { valid_prefix, .. } |
-        utf8::DecodeResult::Incomplete { valid_prefix, .. } => Err(valid_prefix.len()),
+        Ok(s) => return Ok(s),
+        Err(utf8::DecodeError::Invalid { valid_prefix, .. }) |
+        Err(utf8::DecodeError::Incomplete { valid_prefix, .. }) => Err(valid_prefix.len()),
     }
 }
 

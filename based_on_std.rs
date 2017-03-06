@@ -4,9 +4,8 @@ use std::str;
 include!("polyfill.rs");
 
 #[derive(Debug, Copy, Clone)]
-pub enum DecodeResult<'a> {
-    Ok(&'a str),
-    Error {
+pub enum DecodeError<'a> {
+    Invalid {
         valid_prefix: &'a str,
 
         /// In lossy decoding, replace this with "\u{FFFD}"
@@ -30,9 +29,9 @@ pub struct IncompleteChar {
     buffer_len: u8,
 }
 
-pub fn decode(input: &[u8]) -> DecodeResult {
+pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
     let error = match str::from_utf8(input) {
-        Ok(valid) => return DecodeResult::Ok(valid),
+        Ok(valid) => return Ok(valid),
         Err(error) => error,
     };
 
@@ -47,23 +46,23 @@ pub fn decode(input: &[u8]) -> DecodeResult {
         Some(resume_from) => {
             let invalid_sequence_length = resume_from - valid_up_to;
             let (invalid, rest) = after_valid.split_at(invalid_sequence_length);
-            DecodeResult::Error {
+            Err(DecodeError::Invalid {
                 valid_prefix: valid,
                 invalid_sequence: invalid,
                 remaining_input: rest
-            }
+            })
         }
         None => {
             let mut buffer = [0, 0, 0, 0];
             let after_valid = &input[error.valid_up_to()..];
             buffer[..after_valid.len()].copy_from_slice(after_valid);
-            DecodeResult::Incomplete {
+            Err(DecodeError::Incomplete {
                 valid_prefix: valid,
                 incomplete_suffix: IncompleteChar {
                     buffer: buffer,
                     buffer_len: after_valid.len() as u8,
                 }
-            }
+            })
         }
     }
 }
