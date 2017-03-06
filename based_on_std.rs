@@ -1,3 +1,4 @@
+use std::cmp;
 use std::str;
 
 include!("polyfill.rs");
@@ -16,7 +17,6 @@ pub struct InvalidSequence<'a>(pub &'a [u8]);
 pub struct IncompleteChar {
     buffer: [u8; 4],
     buffer_len: u8,
-    char_width: u8,
 }
 
 pub fn decode(input: &[u8]) -> DecodeResult {
@@ -45,7 +45,6 @@ pub fn decode(input: &[u8]) -> DecodeResult {
             DecodeResult::Incomplete(valid, IncompleteChar {
                 buffer: buffer,
                 buffer_len: after_valid.len() as u8,
-                char_width: UTF8_CHAR_WIDTH[buffer[0] as usize],
             })
         }
     }
@@ -58,107 +57,43 @@ pub enum TryCompleteResult<'char, 'input> {
 }
 
 impl IncompleteChar {
-    pub fn try_complete<'char, 'input>(&'char mut self, mut input: &'input [u8])
+    pub fn try_complete<'char, 'input>(&'char mut self, input: &'input [u8])
                                        -> TryCompleteResult<'char, 'input> {
-        macro_rules! require {
-            ($condition: expr) => {
-                if !$condition {
-                    self.char_width = 0xFF;  // Make try_complete panic if called again
-                    let invalid = &self.buffer[..self.buffer_len as usize];
-                    return TryCompleteResult::Error(InvalidSequence(invalid), input)
-                }
-            }
+        let buffer_len = self.buffer_len as usize;
+        let bytes_from_input;
+        {
+            let unwritten = &mut self.buffer[buffer_len..];
+            bytes_from_input = cmp::min(unwritten.len(), input.len());
+            unwritten[..bytes_from_input].copy_from_slice(&input[..bytes_from_input]);
         }
-
-        macro_rules! take_one_byte {
-            () => {
-                if let Some((&next_byte, rest)) = input.split_first() {
-                    self.buffer[self.buffer_len as usize] = next_byte;
-                    self.buffer_len += 1;
-                    input = rest;
-                    next_byte
+        let spliced = &self.buffer[..buffer_len + bytes_from_input];
+        match str::from_utf8(spliced) {
+            Ok(one_code_point) => {
+                TryCompleteResult::Ok(one_code_point, &input[bytes_from_input..])
+            }
+            Err(error) => {
+                let valid_up_to = error.valid_up_to();
+                if valid_up_to > 0 {
+                    let one_code_point = &self.buffer[..valid_up_to];
+                    let one_code_point = unsafe {
+                        str::from_utf8_unchecked(one_code_point)
+                    };
+                    assert!(valid_up_to > buffer_len);
+                    let bytes_from_input = valid_up_to - buffer_len;
+                    TryCompleteResult::Ok(one_code_point, &input[bytes_from_input..])
                 } else {
-                    return TryCompleteResult::StillIncomplete
+                    match utf8error_resume_from(&error, spliced) {
+                        Some(resume_from) => {
+                            let invalid = &spliced[..resume_from];
+                            assert!(resume_from > buffer_len);
+                            let bytes_from_input = resume_from - buffer_len;
+                            let rest = &input[bytes_from_input..];
+                            TryCompleteResult::Error(InvalidSequence(invalid), rest)
+                        }
+                        None => TryCompleteResult::StillIncomplete
+                    }
                 }
             }
         }
-
-        match (self.buffer_len, self.char_width) {
-            (1, 2) | (2, 3) | (3, 4) => {
-                require!(is_continuation_byte(take_one_byte!()));
-            }
-            (1, 3) => {
-                require!(valid_three_bytes_sequence_prefix(self.buffer[0], take_one_byte!()));
-                require!(is_continuation_byte(take_one_byte!()));
-            }
-            (1, 4) => {
-                require!(valid_four_bytes_sequence_prefix(self.buffer[0], take_one_byte!()));
-                require!(is_continuation_byte(take_one_byte!()));
-                require!(is_continuation_byte(take_one_byte!()));
-            }
-            (2, 4) => {
-                require!(is_continuation_byte(take_one_byte!()));
-                require!(is_continuation_byte(take_one_byte!()));
-            }
-            _ => panic!("IncompleteChar::try_complete called again after returning \
-                         TryCompleteResult::Ok or TryCompleteResult::Error")
-        }
-
-        // try_complete will panic if called again:
-        debug_assert!(self.buffer_len == self.char_width);
-
-        let one_code_point = &self.buffer[..self.buffer_len as usize];
-        debug_assert!(str::from_utf8(one_code_point).is_ok());
-        let one_code_point = unsafe {
-            str::from_utf8_unchecked(one_code_point)
-        };
-        TryCompleteResult::Ok(one_code_point, input)
     }
-}
-
-// https://tools.ietf.org/html/rfc3629
-static UTF8_CHAR_WIDTH: [u8; 256] = [
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x1F
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x3F
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x5F
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x7F
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 0x9F
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 0xBF
-    0,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
-    2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, // 0xDF
-    3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, // 0xEF
-    4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0, // 0xFF
-];
-
-#[inline]
-fn is_continuation_byte(b: u8) -> bool {
-    const CONTINUATION_MASK: u8 = 0b1100_0000;
-    const CONTINUATION_TAG: u8 = 0b1000_0000;
-    b & CONTINUATION_MASK == CONTINUATION_TAG
-}
-
-#[inline]
-fn valid_three_bytes_sequence_prefix(first: u8, second: u8) -> bool {
-    matches!((first, second),
-        (0xE0         , 0xA0 ... 0xBF) |
-        (0xE1 ... 0xEC, 0x80 ... 0xBF) |
-        (0xED         , 0x80 ... 0x9F) |
-        // Exclude surrogates: (0xED, 0xA0 ... 0xBF)
-        (0xEE ... 0xEF, 0x80 ... 0xBF)
-    )
-}
-
-#[inline]
-fn valid_four_bytes_sequence_prefix(first: u8, second: u8) -> bool {
-    matches!((first, second),
-        (0xF0         , 0x90 ... 0xBF) |
-        (0xF1 ... 0xF3, 0x80 ... 0xBF) |
-        (0xF4         , 0x80 ... 0x8F)
-    )
 }

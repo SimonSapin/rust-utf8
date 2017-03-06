@@ -58,3 +58,50 @@ fn utf8error_resume_from(error: &Utf8Error, input: &[u8]) -> Option<usize> {
 
     Some(valid_up_to + invalid_sequence_length)
 }
+
+// https://tools.ietf.org/html/rfc3629
+static UTF8_CHAR_WIDTH: [u8; 256] = [
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x1F
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x3F
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x5F
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x7F
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 0x9F
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 0xBF
+    0,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+    2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, // 0xDF
+    3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, // 0xEF
+    4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0, // 0xFF
+];
+
+#[inline]
+fn is_continuation_byte(b: u8) -> bool {
+    const CONTINUATION_MASK: u8 = 0b1100_0000;
+    const CONTINUATION_TAG: u8 = 0b1000_0000;
+    b & CONTINUATION_MASK == CONTINUATION_TAG
+}
+
+#[inline]
+fn valid_three_bytes_sequence_prefix(first: u8, second: u8) -> bool {
+    matches!((first, second),
+        (0xE0         , 0xA0 ... 0xBF) |
+        (0xE1 ... 0xEC, 0x80 ... 0xBF) |
+        (0xED         , 0x80 ... 0x9F) |
+        // Exclude surrogates: (0xED, 0xA0 ... 0xBF)
+        (0xEE ... 0xEF, 0x80 ... 0xBF)
+    )
+}
+
+#[inline]
+fn valid_four_bytes_sequence_prefix(first: u8, second: u8) -> bool {
+    matches!((first, second),
+        (0xF0         , 0x90 ... 0xBF) |
+        (0xF1 ... 0xF3, 0x80 ... 0xBF) |
+        (0xF4         , 0x80 ... 0x8F)
+    )
+}
