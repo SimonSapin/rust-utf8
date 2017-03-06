@@ -25,8 +25,8 @@ pub enum DecodeError<'a> {
 
 #[derive(Debug, Copy, Clone)]
 pub struct IncompleteChar {
-    buffer: [u8; 4],
-    buffer_len: u8,
+    pub buffer: [u8; 4],
+    pub buffer_len: u8,
 }
 
 pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
@@ -65,21 +65,6 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
 }
 
 impl IncompleteChar {
-    pub fn empty() -> Self {
-        IncompleteChar {
-            buffer: [0, 0, 0, 0],
-            buffer_len: 0,
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.buffer_len == 0
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.buffer[..self.buffer_len as usize]
-    }
-
     /// * `None`: still incomplete, call `try_complete` again with more input.
     ///   If no more input is available, this is invalid byte sequence.
     /// * `Some((result, rest))`: We’re done with this `IncompleteChar`.

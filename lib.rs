@@ -36,7 +36,10 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
     pub fn new(push_str: F) -> Self {
         LossyDecoder {
             push_str: push_str,
-            incomplete: IncompleteChar::empty(),
+            incomplete: IncompleteChar {
+                buffer: [0, 0, 0, 0],
+                buffer_len: 0,
+            },
         }
     }
 
@@ -48,7 +51,7 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
     /// If the UTF-8 byte sequence for one code point was split into this bytes chunk
     /// and previous bytes chunks, it will be correctly pieced back together.
     pub fn feed(&mut self, mut input: &[u8]) {
-        if !self.incomplete.is_empty() {
+        if self.incomplete.buffer_len > 0 {
             match self.incomplete.try_complete(input) {
                 Some((Ok(s), remaining)) => {
                     (self.push_str)(s);
@@ -87,7 +90,7 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
 impl<F: FnMut(&str)> Drop for LossyDecoder<F> {
     #[inline]
     fn drop(&mut self) {
-        if !self.incomplete.is_empty() {
+        if self.incomplete.buffer_len > 0 {
             (self.push_str)(REPLACEMENT_CHARACTER)
         }
     }
