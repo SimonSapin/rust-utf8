@@ -5,8 +5,6 @@ use utf8::LossyDecoder;
 #[path = "shared/data.rs"]
 mod data;
 
-
-/// This takes a while in debug mode. Use --release
 #[test]
 fn test_incremental_decoder() {
     let mut chunks = Vec::new();
@@ -18,6 +16,7 @@ fn test_incremental_decoder() {
 
 fn all_partitions<'a>(chunks: &mut Vec<&'a [u8]>, input: &'a [u8], expected: &str) {
     if input.is_empty() {
+        println!("{:?}", chunks);
         let mut string = String::new();
         {
             let mut decoder = LossyDecoder::new(|s| string.push_str(s));
@@ -27,7 +26,7 @@ fn all_partitions<'a>(chunks: &mut Vec<&'a [u8]>, input: &'a [u8], expected: &st
         }
         assert_eq!(string, expected);
     }
-    for i in (1..input.len()).rev() {
+    for i in 1..(input.len() + 1) {
         chunks.push(&input[..i]);
         all_partitions(chunks, &input[i..], expected);
         chunks.pop();

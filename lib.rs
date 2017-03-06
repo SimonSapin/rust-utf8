@@ -27,7 +27,7 @@ pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 /// Use `std::mem::forget` to inhibit this behavior.
 pub struct LossyDecoder<F: FnMut(&str)> {
     push_str: F,
-    incomplete: Option<IncompleteChar>,
+    incomplete: IncompleteChar,
 }
 
 impl<F: FnMut(&str)> LossyDecoder<F> {
@@ -36,7 +36,7 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
     pub fn new(push_str: F) -> Self {
         LossyDecoder {
             push_str: push_str,
-            incomplete: None,
+            incomplete: IncompleteChar::empty(),
         }
     }
 
@@ -48,8 +48,8 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
     /// If the UTF-8 byte sequence for one code point was split into this bytes chunk
     /// and previous bytes chunks, it will be correctly pieced back together.
     pub fn feed(&mut self, mut input: &[u8]) {
-        if let Some(mut incomplete) = self.incomplete.take() {
-            match incomplete.try_complete(input) {
+        if !self.incomplete.is_empty() {
+            match self.incomplete.try_complete(input) {
                 Some((Ok(s), remaining)) => {
                     (self.push_str)(s);
                     input = remaining
@@ -71,7 +71,7 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
                 }
                 Err(DecodeError::Incomplete { valid_prefix, incomplete_suffix }) => {
                     (self.push_str)(valid_prefix);
-                    self.incomplete = Some(incomplete_suffix);
+                    self.incomplete = incomplete_suffix;
                     return
                 }
                 Err(DecodeError::Invalid { valid_prefix, remaining_input, .. }) => {
@@ -87,7 +87,7 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
 impl<F: FnMut(&str)> Drop for LossyDecoder<F> {
     #[inline]
     fn drop(&mut self) {
-        if self.incomplete.is_some() {
+        if !self.incomplete.is_empty() {
             (self.push_str)(REPLACEMENT_CHARACTER)
         }
     }

@@ -65,6 +65,17 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
 }
 
 impl IncompleteChar {
+    pub fn empty() -> Self {
+        IncompleteChar {
+            buffer: [0, 0, 0, 0],
+            buffer_len: 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer_len == 0
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         &self.buffer[..self.buffer_len as usize]
     }
@@ -85,6 +96,7 @@ impl IncompleteChar {
         let spliced = &self.buffer[..buffer_len + bytes_from_input];
         match str::from_utf8(spliced) {
             Ok(valid) => {
+                self.buffer_len = 0;
                 Some((Ok(valid), &input[bytes_from_input..]))
             }
             Err(error) => {
@@ -94,19 +106,22 @@ impl IncompleteChar {
                     let valid = unsafe {
                         str::from_utf8_unchecked(valid)
                     };
-                    assert!(valid_up_to > buffer_len);
-                    let bytes_from_input = valid_up_to - buffer_len;
+                    let bytes_from_input = valid_up_to.checked_sub(buffer_len).unwrap();
+                    self.buffer_len = 0;
                     Some((Ok(valid), &input[bytes_from_input..]))
                 } else {
                     match utf8error_error_len(&error, spliced) {
                         Some(invalid_sequence_length) => {
                             let invalid = &spliced[..invalid_sequence_length];
-                            assert!(invalid_sequence_length > buffer_len);
-                            let bytes_from_input = invalid_sequence_length - buffer_len;
+                            let bytes_from_input = invalid_sequence_length.checked_sub(buffer_len).unwrap();
                             let rest = &input[bytes_from_input..];
+                            self.buffer_len = 0;
                             Some((Err(invalid), rest))
                         }
-                        None => None
+                        None => {
+                            self.buffer_len = spliced.len() as u8;
+                            None
+                        }
                     }
                 }
             }
