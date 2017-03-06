@@ -1,5 +1,7 @@
 use std::str;
 
+include!("polyfill.rs");
+
 #[derive(Debug, Copy, Clone)]
 pub enum DecodeResult<'a> {
     Ok(&'a str),
@@ -22,71 +24,31 @@ pub fn decode(input: &[u8]) -> DecodeResult {
         Ok(valid) => return DecodeResult::Ok(valid),
         Err(error) => error,
     };
+
     // FIXME: separate function from here to guide inlining?
-    let (valid, after_valid) = input.split_at(error.valid_up_to());
+    let valid_up_to = error.valid_up_to();
+    let (valid, after_valid) = input.split_at(valid_up_to);
     let valid = unsafe {
         str::from_utf8_unchecked(valid)
     };
 
-    // `after_valid` is not empty, `str::from_utf8` would have returned `Ok(_)`.
-    let first = after_valid[0];
-    let char_width = UTF8_CHAR_WIDTH[first as usize];
-
-    macro_rules! get_byte {
-        ($i: expr) => {
-            if let Some(&byte) = after_valid.get($i) {
-                byte
-            } else {
-                let mut buffer = [0, 0, 0, 0];
-                buffer[..$i].copy_from_slice(after_valid);
-                return DecodeResult::Incomplete(valid, IncompleteChar {
-                    buffer: buffer,
-                    buffer_len: $i,
-                    char_width: char_width,
-                })
-            }
+    match utf8error_resume_from(&error, input) {
+        Some(resume_from) => {
+            let invalid_sequence_length = resume_from - valid_up_to;
+            let (invalid, rest) = after_valid.split_at(invalid_sequence_length);
+            DecodeResult::Error(valid, InvalidSequence(invalid), rest)
+        }
+        None => {
+            let mut buffer = [0, 0, 0, 0];
+            let after_valid = &input[error.valid_up_to()..];
+            buffer[..after_valid.len()].copy_from_slice(after_valid);
+            DecodeResult::Incomplete(valid, IncompleteChar {
+                buffer: buffer,
+                buffer_len: after_valid.len() as u8,
+                char_width: UTF8_CHAR_WIDTH[buffer[0] as usize],
+            })
         }
     }
-
-    let invalid_sequence_length;
-    match char_width {
-        0 => invalid_sequence_length = 1,
-        1 => panic!("found ASCII byte after Utf8Error.valid_up_to()"),
-        2 => {
-            let second = get_byte!(1);
-            debug_assert!(!is_continuation_byte(second));
-            invalid_sequence_length = 1;
-        }
-        3 => {
-            let second = get_byte!(1);
-            if valid_three_bytes_sequence_prefix(first, second) {
-                let third = get_byte!(2);
-                debug_assert!(!is_continuation_byte(third));
-                invalid_sequence_length = 2;
-            } else {
-                invalid_sequence_length = 1;
-            }
-        }
-        4 => {
-            let second = get_byte!(1);
-            if valid_four_bytes_sequence_prefix(first, second) {
-                let third = get_byte!(2);
-                if is_continuation_byte(third) {
-                    let fourth = get_byte!(3);
-                    debug_assert!(!is_continuation_byte(fourth));
-                    invalid_sequence_length = 3;
-                } else {
-                    invalid_sequence_length = 2;
-                }
-            } else {
-                invalid_sequence_length = 1;
-            }
-        }
-        _ => unreachable!()
-    }
-
-    let (invalid, rest) = after_valid.split_at(invalid_sequence_length);
-    DecodeResult::Error(valid, InvalidSequence(invalid), rest)
 }
 
 pub enum TryCompleteResult<'char, 'input> {
