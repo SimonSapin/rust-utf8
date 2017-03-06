@@ -69,15 +69,15 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
                     (self.push_str)(s);
                     return
                 }
-                DecodeResult::Incomplete(s, i) => {
-                    (self.push_str)(s);
-                    self.incomplete = Some(i);
+                DecodeResult::Incomplete { valid_prefix, incomplete_suffix } => {
+                    (self.push_str)(valid_prefix);
+                    self.incomplete = Some(incomplete_suffix);
                     return
                 }
-                DecodeResult::Error(s, _, remaining) => {
-                    (self.push_str)(s);
+                DecodeResult::Error { valid_prefix, remaining_input, .. } => {
+                    (self.push_str)(valid_prefix);
                     (self.push_str)(REPLACEMENT_CHARACTER);
-                    input = remaining
+                    input = remaining_input
                 }
             }
         }

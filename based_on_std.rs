@@ -6,12 +6,23 @@ include!("polyfill.rs");
 #[derive(Debug, Copy, Clone)]
 pub enum DecodeResult<'a> {
     Ok(&'a str),
-    Error(&'a str, InvalidSequence<'a>, &'a [u8]),
-    Incomplete(&'a str, IncompleteChar),
-}
+    Error {
+        valid_prefix: &'a str,
 
-#[derive(Debug, Copy, Clone)]
-pub struct InvalidSequence<'a>(pub &'a [u8]);
+        /// In lossy decoding, replace this with "\u{FFFD}"
+        invalid_sequence: &'a [u8],
+
+        /// To keep decoding, call `decode()` again with this.
+        remaining_input: &'a [u8],
+    },
+    Incomplete {
+        valid_prefix: &'a str,
+
+        /// Call the `try_complete` method with more input is available.
+        /// If no more input is available, this is a decoding error.
+        incomplete_suffix: IncompleteChar,
+    },
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct IncompleteChar {
@@ -36,22 +47,30 @@ pub fn decode(input: &[u8]) -> DecodeResult {
         Some(resume_from) => {
             let invalid_sequence_length = resume_from - valid_up_to;
             let (invalid, rest) = after_valid.split_at(invalid_sequence_length);
-            DecodeResult::Error(valid, InvalidSequence(invalid), rest)
+            DecodeResult::Error {
+                valid_prefix: valid,
+                invalid_sequence: invalid,
+                remaining_input: rest
+            }
         }
         None => {
             let mut buffer = [0, 0, 0, 0];
             let after_valid = &input[error.valid_up_to()..];
             buffer[..after_valid.len()].copy_from_slice(after_valid);
-            DecodeResult::Incomplete(valid, IncompleteChar {
-                buffer: buffer,
-                buffer_len: after_valid.len() as u8,
-            })
+            DecodeResult::Incomplete {
+                valid_prefix: valid,
+                incomplete_suffix: IncompleteChar {
+                    buffer: buffer,
+                    buffer_len: after_valid.len() as u8,
+                }
+            }
         }
     }
 }
 
 impl IncompleteChar {
     /// * `None`: still incomplete, call `try_complete` again with more input.
+    ///   If no more input is available, this is a decoding error.
     /// * `Some((result, rest))`: We’re done with this `IncompleteChar`.
     ///   To keep decoding, pass `rest` to `decode()`.
     pub fn try_complete<'char, 'input>(&'char mut self, input: &'input [u8])

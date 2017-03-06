@@ -14,15 +14,15 @@ pub fn string_from_utf8_lossy(input: &[u8]) -> Cow<str> {
                 string.push_str(s);
                 return string.into()
             }
-            DecodeResult::Incomplete(s, _) => {
-                string.push_str(s);
+            DecodeResult::Incomplete { valid_prefix, .. } => {
+                string.push_str(valid_prefix);
                 string.push_str(REPLACEMENT_CHARACTER);
                 return string.into()
             }
-            DecodeResult::Error(s, _, remaining) => {
-                string.push_str(s);
+            DecodeResult::Error { valid_prefix, remaining_input, .. } => {
+                string.push_str(valid_prefix);
                 string.push_str(REPLACEMENT_CHARACTER);
-                result = decode(remaining);
+                result = decode(remaining_input);
             }
         }
     }
