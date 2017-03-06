@@ -1,4 +1,4 @@
-#![feature(test, iter_arith)]
+#![feature(test)]
 
 extern crate test;
 extern crate utf8;

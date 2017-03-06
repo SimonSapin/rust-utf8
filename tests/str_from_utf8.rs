@@ -1,14 +1,11 @@
 extern crate utf8;
 
-use utf8::Decoder;
-
 /// A re-implementation of std::str::from_utf8
 pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {
-    let (ch, s, result) = Decoder::new().decode(input);
-    debug_assert!(ch.len() == 0);
-    match result {
-        utf8::Result::Ok => return Ok(s),
-        utf8::Result::Error { .. } | utf8::Result::Incomplete => Err(s.len()),
+    match utf8::decode(input) {
+        utf8::DecodeResult::Ok(s) => return Ok(s),
+        utf8::DecodeResult::Error(s, _, _) |
+        utf8::DecodeResult::Incomplete(s, _) => Err(s.len()),
     }
 }
 

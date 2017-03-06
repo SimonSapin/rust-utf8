@@ -1,31 +1,29 @@
 use std::borrow::Cow;
-use utf8::{Decoder, Result, REPLACEMENT_CHARACTER};
+use utf8::{decode, DecodeResult, REPLACEMENT_CHARACTER};
 
 /// A re-implementation of String::from_utf8_lossy
 pub fn string_from_utf8_lossy(input: &[u8]) -> Cow<str> {
-    let mut decoder = Decoder::new();
-    let (ch, s, result) = decoder.decode(input);
-    debug_assert!(ch.len() == 0);
-    let mut remaining = match result {
-        Result::Ok => return s.into(),
-        Result::Error { remaining_input_after_error: r } => Some(r),
-        Result::Incomplete => None,
-    };
-    let mut string = String::from(s);
+    let mut result = decode(input);
+    if let DecodeResult::Ok(s) = result {
+        return s.into()
+    }
+    let mut string = String::with_capacity(input.len() + REPLACEMENT_CHARACTER.len());
     loop {
-        string.push_str(REPLACEMENT_CHARACTER);
-        if let Some(r) = remaining {
-            let (ch, s, result) = decoder.decode(r);
-            debug_assert!(ch.len() == 0);
-            string.push_str(s);
-            remaining = match result {
-                Result::Ok => break,
-                Result::Error { remaining_input_after_error: r } => Some(r),
-                Result::Incomplete => None,
-            };
-        } else {
-            break
+        match result {
+            DecodeResult::Ok(s) => {
+                string.push_str(s);
+                return string.into()
+            }
+            DecodeResult::Incomplete(s, _) => {
+                string.push_str(s);
+                string.push_str(REPLACEMENT_CHARACTER);
+                return string.into()
+            }
+            DecodeResult::Error(s, _, remaining) => {
+                string.push_str(s);
+                string.push_str(REPLACEMENT_CHARACTER);
+                result = decode(remaining);
+            }
         }
     }
-    string.into()
 }

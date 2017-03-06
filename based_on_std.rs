@@ -55,16 +55,16 @@ pub fn decode(input: &[u8]) -> DecodeResult {
         2 => {
             let second = get_byte!(1);
             debug_assert!(!is_continuation_byte(second));
-            invalid_sequence_length = 2;
+            invalid_sequence_length = 1;
         }
         3 => {
             let second = get_byte!(1);
             if valid_three_bytes_sequence_prefix(first, second) {
                 let third = get_byte!(2);
                 debug_assert!(!is_continuation_byte(third));
-                invalid_sequence_length = 3;
-            } else {
                 invalid_sequence_length = 2;
+            } else {
+                invalid_sequence_length = 1;
             }
         }
         4 => {
@@ -74,12 +74,12 @@ pub fn decode(input: &[u8]) -> DecodeResult {
                 if is_continuation_byte(third) {
                     let fourth = get_byte!(3);
                     debug_assert!(!is_continuation_byte(fourth));
-                    invalid_sequence_length = 4;
-                } else {
                     invalid_sequence_length = 3;
+                } else {
+                    invalid_sequence_length = 2;
                 }
             } else {
-                invalid_sequence_length = 2;
+                invalid_sequence_length = 1;
             }
         }
         _ => unreachable!()
