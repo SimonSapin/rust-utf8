@@ -8,7 +8,6 @@ repository = "https://github.com/SimonSapin/rust-utf8"
 
 [lib]
 name = "utf8"
-path = "lib.rs"
 test = false
 bench = false
 

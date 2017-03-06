@@ -1,9 +1,4 @@
-#[macro_use] extern crate matches;
-
-include!("based_on_std.rs");
-
-/// The replacement character, U+FFFD. In lossy decoding, insert it for every decoding error.
-pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
+use super::*;
 
 /// A push-based, lossy decoder for UTF-8.
 /// Errors are replaced with the U+FFFD replacement character.

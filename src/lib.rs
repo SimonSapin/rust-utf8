@@ -1,7 +1,15 @@
+#[macro_use] extern crate matches;
+
+mod polyfill;
+mod lossy;
+
+pub use lossy::LossyDecoder;
+
 use std::cmp;
 use std::str;
 
-include!("polyfill.rs");
+/// The replacement character, U+FFFD. In lossy decoding, insert it for every decoding error.
+pub const REPLACEMENT_CHARACTER: &'static str = "\u{FFFD}";
 
 #[derive(Debug, Copy, Clone)]
 pub enum DecodeError<'a> {
@@ -39,7 +47,7 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
         str::from_utf8_unchecked(valid)
     };
 
-    match utf8error_error_len(&error, input) {
+    match polyfill::utf8error_error_len(&error, input) {
         Some(invalid_sequence_length) => {
             let (invalid, rest) = after_valid.split_at(invalid_sequence_length);
             Err(DecodeError::Invalid {
@@ -98,7 +106,7 @@ impl IncompleteChar {
                     self.buffer_len = 0;
                     Some((Ok(valid), &input[bytes_from_input..]))
                 } else {
-                    match utf8error_error_len(&error, spliced) {
+                    match polyfill::utf8error_error_len(&error, spliced) {
                         Some(invalid_sequence_length) => {
                             let invalid = &spliced[..invalid_sequence_length];
                             let bytes_from_input = invalid_sequence_length.checked_sub(buffer_len).unwrap();

@@ -1,7 +1,7 @@
 use std::str::Utf8Error;
 
 /// Remove this when https://github.com/rust-lang/rust/pull/40212 is stable
-fn utf8error_error_len(error: &Utf8Error, input: &[u8]) -> Option<usize> {
+pub fn utf8error_error_len(error: &Utf8Error, input: &[u8]) -> Option<usize> {
     let after_valid = &input[error.valid_up_to()..];
 
     // `after_valid` is not empty, `str::from_utf8` would have returned `Ok(_)`.
