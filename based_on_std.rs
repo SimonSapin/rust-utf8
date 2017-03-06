@@ -18,7 +18,7 @@ pub enum DecodeError<'a> {
         valid_prefix: &'a str,
 
         /// Call the `try_complete` method with more input is available.
-        /// If no more input is available, this is a decoding error.
+        /// If no more input is available, this is an invalid byte sequence.
         incomplete_suffix: IncompleteChar,
     },
 }
@@ -68,8 +68,12 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
 }
 
 impl IncompleteChar {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buffer[..self.buffer_len as usize]
+    }
+
     /// * `None`: still incomplete, call `try_complete` again with more input.
-    ///   If no more input is available, this is a decoding error.
+    ///   If no more input is available, this is invalid byte sequence.
     /// * `Some((result, rest))`: We’re done with this `IncompleteChar`.
     ///   To keep decoding, pass `rest` to `decode()`.
     pub fn try_complete<'char, 'input>(&'char mut self, input: &'input [u8])
