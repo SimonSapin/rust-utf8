@@ -5,20 +5,18 @@ include!("polyfill.rs");
 
 #[derive(Debug, Copy, Clone)]
 pub enum DecodeError<'a> {
+    /// In lossy decoding insert `valid_prefix`, then `"\u{FFFD}"`,
+    /// then call `decode()` again with `remaining_input`.
     Invalid {
         valid_prefix: &'a str,
-
-        /// In lossy decoding, replace this with "\u{FFFD}"
         invalid_sequence: &'a [u8],
-
-        /// To keep decoding, call `decode()` again with this.
         remaining_input: &'a [u8],
     },
+
+    /// Call the `incomplete_suffix.try_complete` method with more input when available.
+    /// If no more input is available, this is an invalid byte sequence.
     Incomplete {
         valid_prefix: &'a str,
-
-        /// Call the `try_complete` method with more input is available.
-        /// If no more input is available, this is an invalid byte sequence.
         incomplete_suffix: IncompleteChar,
     },
 }
@@ -51,20 +49,25 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
             })
         }
         None => {
-            let mut buffer = [0, 0, 0, 0];
-            buffer[..after_valid.len()].copy_from_slice(after_valid);
             Err(DecodeError::Incomplete {
                 valid_prefix: valid,
-                incomplete_suffix: IncompleteChar {
-                    buffer: buffer,
-                    buffer_len: after_valid.len() as u8,
-                }
+                incomplete_suffix: IncompleteChar::new(after_valid),
             })
         }
     }
 }
 
 impl IncompleteChar {
+    pub fn new(bytes: &[u8]) -> Self {
+        let mut buffer = [0, 0, 0, 0];
+        let len = bytes.len();
+        buffer[..len].copy_from_slice(bytes);
+        IncompleteChar {
+            buffer: buffer,
+            buffer_len: len as u8,
+        }
+    }
+
     /// * `None`: still incomplete, call `try_complete` again with more input.
     ///   If no more input is available, this is invalid byte sequence.
     /// * `Some((result, rest))`: We’re done with this `IncompleteChar`.
