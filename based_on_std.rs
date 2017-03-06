@@ -50,15 +50,12 @@ pub fn decode(input: &[u8]) -> DecodeResult {
     }
 }
 
-pub enum TryCompleteResult<'char, 'input> {
-    Ok(&'char str, &'input [u8]),
-    Error(InvalidSequence<'char>, &'input [u8]),
-    StillIncomplete,
-}
-
 impl IncompleteChar {
+    /// * `None`: still incomplete, call `try_complete` again with more input.
+    /// * `Some((result, rest))`: We’re done with this `IncompleteChar`.
+    ///   To keep decoding, pass `rest` to `decode()`.
     pub fn try_complete<'char, 'input>(&'char mut self, input: &'input [u8])
-                                       -> TryCompleteResult<'char, 'input> {
+                                       -> Option<(Result<&'char str, &'char [u8]>, &'input [u8])> {
         let buffer_len = self.buffer_len as usize;
         let bytes_from_input;
         {
@@ -68,19 +65,19 @@ impl IncompleteChar {
         }
         let spliced = &self.buffer[..buffer_len + bytes_from_input];
         match str::from_utf8(spliced) {
-            Ok(one_code_point) => {
-                TryCompleteResult::Ok(one_code_point, &input[bytes_from_input..])
+            Ok(valid) => {
+                Some((Ok(valid), &input[bytes_from_input..]))
             }
             Err(error) => {
                 let valid_up_to = error.valid_up_to();
                 if valid_up_to > 0 {
-                    let one_code_point = &self.buffer[..valid_up_to];
-                    let one_code_point = unsafe {
-                        str::from_utf8_unchecked(one_code_point)
+                    let valid = &self.buffer[..valid_up_to];
+                    let valid = unsafe {
+                        str::from_utf8_unchecked(valid)
                     };
                     assert!(valid_up_to > buffer_len);
                     let bytes_from_input = valid_up_to - buffer_len;
-                    TryCompleteResult::Ok(one_code_point, &input[bytes_from_input..])
+                    Some((Ok(valid), &input[bytes_from_input..]))
                 } else {
                     match utf8error_resume_from(&error, spliced) {
                         Some(resume_from) => {
@@ -88,9 +85,9 @@ impl IncompleteChar {
                             assert!(resume_from > buffer_len);
                             let bytes_from_input = resume_from - buffer_len;
                             let rest = &input[bytes_from_input..];
-                            TryCompleteResult::Error(InvalidSequence(invalid), rest)
+                            Some((Err(invalid), rest))
                         }
-                        None => TryCompleteResult::StillIncomplete
+                        None => None
                     }
                 }
             }

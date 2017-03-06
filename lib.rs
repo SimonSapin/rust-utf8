@@ -50,15 +50,15 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
     pub fn feed(&mut self, mut input: &[u8]) {
         if let Some(mut incomplete) = self.incomplete.take() {
             match incomplete.try_complete(input) {
-                TryCompleteResult::Ok(s, remaining) => {
+                Some((Ok(s), remaining)) => {
                     (self.push_str)(s);
                     input = remaining
                 }
-                TryCompleteResult::Error(_, remaining) => {
+                Some((Err(_), remaining)) => {
                     (self.push_str)(REPLACEMENT_CHARACTER);
                     input = remaining
                 }
-                TryCompleteResult::StillIncomplete => {
+                None => {
                     return
                 }
             }
