@@ -36,15 +36,13 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
     };
 
     // FIXME: separate function from here to guide inlining?
-    let valid_up_to = error.valid_up_to();
-    let (valid, after_valid) = input.split_at(valid_up_to);
+    let (valid, after_valid) = input.split_at(error.valid_up_to());
     let valid = unsafe {
         str::from_utf8_unchecked(valid)
     };
 
-    match utf8error_resume_from(&error, input) {
-        Some(resume_from) => {
-            let invalid_sequence_length = resume_from - valid_up_to;
+    match utf8error_error_len(&error, input) {
+        Some(invalid_sequence_length) => {
             let (invalid, rest) = after_valid.split_at(invalid_sequence_length);
             Err(DecodeError::Invalid {
                 valid_prefix: valid,
@@ -54,7 +52,6 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
         }
         None => {
             let mut buffer = [0, 0, 0, 0];
-            let after_valid = &input[error.valid_up_to()..];
             buffer[..after_valid.len()].copy_from_slice(after_valid);
             Err(DecodeError::Incomplete {
                 valid_prefix: valid,
@@ -101,11 +98,11 @@ impl IncompleteChar {
                     let bytes_from_input = valid_up_to - buffer_len;
                     Some((Ok(valid), &input[bytes_from_input..]))
                 } else {
-                    match utf8error_resume_from(&error, spliced) {
-                        Some(resume_from) => {
-                            let invalid = &spliced[..resume_from];
-                            assert!(resume_from > buffer_len);
-                            let bytes_from_input = resume_from - buffer_len;
+                    match utf8error_error_len(&error, spliced) {
+                        Some(invalid_sequence_length) => {
+                            let invalid = &spliced[..invalid_sequence_length];
+                            assert!(invalid_sequence_length > buffer_len);
+                            let bytes_from_input = invalid_sequence_length - buffer_len;
                             let rest = &input[bytes_from_input..];
                             Some((Err(invalid), rest))
                         }

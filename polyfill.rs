@@ -1,9 +1,8 @@
 use std::str::Utf8Error;
 
 /// Remove this when https://github.com/rust-lang/rust/pull/40212 is stable
-fn utf8error_resume_from(error: &Utf8Error, input: &[u8]) -> Option<usize> {
-    let valid_up_to = error.valid_up_to();
-    let after_valid = &input[valid_up_to..];
+fn utf8error_error_len(error: &Utf8Error, input: &[u8]) -> Option<usize> {
+    let after_valid = &input[error.valid_up_to()..];
 
     // `after_valid` is not empty, `str::from_utf8` would have returned `Ok(_)`.
     let first = after_valid[0];
@@ -56,7 +55,7 @@ fn utf8error_resume_from(error: &Utf8Error, input: &[u8]) -> Option<usize> {
         _ => unreachable!()
     }
 
-    Some(valid_up_to + invalid_sequence_length)
+    Some(invalid_sequence_length)
 }
 
 // https://tools.ietf.org/html/rfc3629
