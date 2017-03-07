@@ -1,6 +1,6 @@
 [package]
 name = "utf-8"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Simon Sapin <simon.sapin@exyr.org>"]
 description = "Incremental, zero-copy UTF-8 decoding with error handling"
 license = "MIT OR Apache-2.0"
