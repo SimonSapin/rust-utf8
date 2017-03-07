@@ -25,12 +25,12 @@ pub enum DecodeError<'a> {
     /// If no more input is available, this is an invalid byte sequence.
     Incomplete {
         valid_prefix: &'a str,
-        incomplete_suffix: IncompleteChar,
+        incomplete_suffix: Incomplete,
     },
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct IncompleteChar {
+pub struct Incomplete {
     pub buffer: [u8; 4],
     pub buffer_len: u8,
 }
@@ -59,18 +59,18 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
         None => {
             Err(DecodeError::Incomplete {
                 valid_prefix: valid,
-                incomplete_suffix: IncompleteChar::new(after_valid),
+                incomplete_suffix: Incomplete::new(after_valid),
             })
         }
     }
 }
 
-impl IncompleteChar {
+impl Incomplete {
     pub fn new(bytes: &[u8]) -> Self {
         let mut buffer = [0, 0, 0, 0];
         let len = bytes.len();
         buffer[..len].copy_from_slice(bytes);
-        IncompleteChar {
+        Incomplete {
             buffer: buffer,
             buffer_len: len as u8,
         }
@@ -78,7 +78,7 @@ impl IncompleteChar {
 
     /// * `None`: still incomplete, call `try_complete` again with more input.
     ///   If no more input is available, this is invalid byte sequence.
-    /// * `Some((result, rest))`: We’re done with this `IncompleteChar`.
+    /// * `Some((result, rest))`: We’re done with this `Incomplete`.
     ///   To keep decoding, pass `rest` to `decode()`.
     pub fn try_complete<'char, 'input>(&'char mut self, input: &'input [u8])
                                        -> Option<(Result<&'char str, &'char [u8]>, &'input [u8])> {

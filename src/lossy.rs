@@ -22,7 +22,7 @@ use super::*;
 /// Use `std::mem::forget` to inhibit this behavior.
 pub struct LossyDecoder<F: FnMut(&str)> {
     push_str: F,
-    incomplete: IncompleteChar,
+    incomplete: Incomplete,
 }
 
 impl<F: FnMut(&str)> LossyDecoder<F> {
@@ -31,7 +31,7 @@ impl<F: FnMut(&str)> LossyDecoder<F> {
     pub fn new(push_str: F) -> Self {
         LossyDecoder {
             push_str: push_str,
-            incomplete: IncompleteChar {
+            incomplete: Incomplete {
                 buffer: [0, 0, 0, 0],
                 buffer_len: 0,
             },
