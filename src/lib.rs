@@ -78,10 +78,10 @@ impl Incomplete {
 
     /// * `None`: still incomplete, call `try_complete` again with more input.
     ///   If no more input is available, this is invalid byte sequence.
-    /// * `Some((result, rest))`: We’re done with this `Incomplete`.
-    ///   To keep decoding, pass `rest` to `decode()`.
-    pub fn try_complete<'char, 'input>(&'char mut self, input: &'input [u8])
-                                       -> Option<(Result<&'char str, &'char [u8]>, &'input [u8])> {
+    /// * `Some((result, remaining_input))`: We’re done with this `Incomplete`.
+    ///   To keep decoding, pass `remaining_input` to `decode()`.
+    pub fn try_complete<'input>(&mut self, input: &'input [u8])
+                                -> Option<(Result<&str, &[u8]>, &'input [u8])> {
         let buffer_len = self.buffer_len as usize;
         let copied_from_input;
         {
