@@ -83,17 +83,17 @@ impl IncompleteChar {
     pub fn try_complete<'char, 'input>(&'char mut self, input: &'input [u8])
                                        -> Option<(Result<&'char str, &'char [u8]>, &'input [u8])> {
         let buffer_len = self.buffer_len as usize;
-        let bytes_from_input;
+        let copied_from_input;
         {
             let unwritten = &mut self.buffer[buffer_len..];
-            bytes_from_input = cmp::min(unwritten.len(), input.len());
-            unwritten[..bytes_from_input].copy_from_slice(&input[..bytes_from_input]);
+            copied_from_input = cmp::min(unwritten.len(), input.len());
+            unwritten[..copied_from_input].copy_from_slice(&input[..copied_from_input]);
         }
-        let spliced = &self.buffer[..buffer_len + bytes_from_input];
+        let spliced = &self.buffer[..buffer_len + copied_from_input];
         match str::from_utf8(spliced) {
             Ok(valid) => {
                 self.buffer_len = 0;
-                Some((Ok(valid), &input[bytes_from_input..]))
+                Some((Ok(valid), &input[copied_from_input..]))
             }
             Err(error) => {
                 let valid_up_to = error.valid_up_to();
@@ -102,15 +102,15 @@ impl IncompleteChar {
                     let valid = unsafe {
                         str::from_utf8_unchecked(valid)
                     };
-                    let bytes_from_input = valid_up_to.checked_sub(buffer_len).unwrap();
+                    let consumed = valid_up_to.checked_sub(buffer_len).unwrap();
                     self.buffer_len = 0;
-                    Some((Ok(valid), &input[bytes_from_input..]))
+                    Some((Ok(valid), &input[consumed..]))
                 } else {
                     match polyfill::utf8error_error_len(&error, spliced) {
                         Some(invalid_sequence_length) => {
                             let invalid = &spliced[..invalid_sequence_length];
-                            let bytes_from_input = invalid_sequence_length.checked_sub(buffer_len).unwrap();
-                            let rest = &input[bytes_from_input..];
+                            let consumed = invalid_sequence_length.checked_sub(buffer_len).unwrap();
+                            let rest = &input[consumed..];
                             self.buffer_len = 0;
                             Some((Err(invalid), rest))
                         }
