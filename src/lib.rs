@@ -66,6 +66,17 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
 }
 
 impl Incomplete {
+    pub fn empty() -> Self {
+        Incomplete {
+            buffer: [0, 0, 0, 0],
+            buffer_len: 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer_len == 0
+    }
+
     pub fn new(bytes: &[u8]) -> Self {
         let mut buffer = [0, 0, 0, 0];
         let len = bytes.len();

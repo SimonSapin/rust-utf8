@@ -1,6 +1,6 @@
 use std::str::Utf8Error;
 
-/// Remove this when https://github.com/rust-lang/rust/pull/40212 is stable
+/// Replace with `error.error_len()` when https://github.com/rust-lang/rust/issues/40494 is stable
 pub fn utf8error_error_len(error: &Utf8Error, input: &[u8]) -> Option<usize> {
     let after_valid = &input[error.valid_up_to()..];
 
