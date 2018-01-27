@@ -1,6 +1,3 @@
-#[macro_use] extern crate matches;
-
-mod polyfill;
 mod lossy;
 
 pub use lossy::LossyDecoder;
@@ -47,7 +44,7 @@ pub fn decode(input: &[u8]) -> Result<&str, DecodeError> {
         str::from_utf8_unchecked(valid)
     };
 
-    match polyfill::utf8error_error_len(&error, input) {
+    match error.error_len() {
         Some(invalid_sequence_length) => {
             let (invalid, rest) = after_valid.split_at(invalid_sequence_length);
             Err(DecodeError::Invalid {
@@ -117,7 +114,7 @@ impl Incomplete {
                     self.buffer_len = 0;
                     Some((Ok(valid), &input[consumed..]))
                 } else {
-                    match polyfill::utf8error_error_len(&error, spliced) {
+                    match error.error_len() {
                         Some(invalid_sequence_length) => {
                             let invalid = &spliced[..invalid_sequence_length];
                             let consumed = invalid_sequence_length.checked_sub(buffer_len).unwrap();
