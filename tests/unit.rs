@@ -163,8 +163,8 @@ fn test_bufread_decoder() {
         all_partitions(input, |chunks| {
             let mut decoder = BufReadDecoder::new(Chunks(chunks.to_vec().into()));
             let mut string = String::new();
-            while let Some(s) = decoder.next_lossy().unwrap() {
-                string.push_str(s)
+            while let Some(result) = decoder.next_lossy() {
+                string.push_str(result.unwrap())
             }
             assert_eq!(string, expected)
         });
