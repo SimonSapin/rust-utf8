@@ -161,11 +161,8 @@ fn test_incremental_decoder() {
 fn test_bufread_decoder() {
     for &(input, expected) in DECODED_LOSSY {
         all_partitions(input, |chunks| {
-            let mut decoder = BufReadDecoder::new(Chunks(chunks.to_vec().into()));
-            let mut string = String::new();
-            while let Some(result) = decoder.next_lossy() {
-                string.push_str(result.unwrap())
-            }
+            let chunks = Chunks(chunks.to_vec().into());
+            let string = BufReadDecoder::read_to_string_lossy(chunks).unwrap();
             assert_eq!(string, expected)
         });
     }

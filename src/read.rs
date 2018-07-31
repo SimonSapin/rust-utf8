@@ -31,6 +31,16 @@ impl<'a> BufReadDecoderError<'a> {
 }
 
 impl<B: BufRead> BufReadDecoder<B> {
+    /// This is to `Read::read_to_string` what `String::from_utf8_lossy` is to `String::from_utf8`.
+    pub fn read_to_string_lossy(buf_read: B) -> io::Result<String> {
+        let mut decoder = Self::new(buf_read);
+        let mut string = String::new();
+        while let Some(result) = decoder.next_lossy() {
+            string.push_str(result?)
+        }
+        Ok(string)
+    }
+
     pub fn new(buf_read: B) -> Self {
         Self {
             buf_read,
