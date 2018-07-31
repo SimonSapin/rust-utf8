@@ -57,7 +57,7 @@ impl<B: BufRead> BufReadDecoder<B> {
     /// Decode and consume the next chunk of UTF-8 input.
     ///
     /// This method is intended to be called repeatedly until it returns `None`,
-    /// which presents EOF from the underlying byte stream.
+    /// which represents EOF from the underlying byte stream.
     /// This is similar to `Iterator::next`,
     /// except that decoded chunks borrow the decoder (~iterator)
     /// so they need to be handled or copied before the next chunk can start decoding.
