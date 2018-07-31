@@ -1,6 +1,8 @@
 mod lossy;
+mod read;
 
 pub use lossy::LossyDecoder;
+pub use read::{BufReadDecoder, BufReadDecoderError};
 
 use std::cmp;
 use std::str;
@@ -90,41 +92,57 @@ impl Incomplete {
     ///   To keep decoding, pass `remaining_input` to `decode()`.
     pub fn try_complete<'input>(&mut self, input: &'input [u8])
                                 -> Option<(Result<&str, &[u8]>, &'input [u8])> {
-        let buffer_len = self.buffer_len as usize;
+        let (consumed, opt_result) = self.try_complete_offsets(input);
+        let result = opt_result?;
+        let remaining_input = &input[consumed..];
+        let result_bytes = self.take_buffer();
+        let result = match result {
+            Ok(()) => Ok(unsafe { str::from_utf8_unchecked(result_bytes) }),
+            Err(()) => Err(result_bytes),
+        };
+        Some((result, remaining_input))
+    }
+
+    fn take_buffer(&mut self) -> &[u8] {
+        let len = self.buffer_len as usize;
+        self.buffer_len = 0;
+        &self.buffer[..len as usize]
+    }
+
+    /// (consumed_from_input, None): not enough input
+    /// (consumed_from_input, Some(Err(()))): error bytes in buffer
+    /// (consumed_from_input, Some(Ok(()))): UTF-8 string in buffer
+    fn try_complete_offsets(&mut self, input: &[u8]) -> (usize, Option<Result<(), ()>>) {
+        let initial_buffer_len = self.buffer_len as usize;
         let copied_from_input;
         {
-            let unwritten = &mut self.buffer[buffer_len..];
+            let unwritten = &mut self.buffer[initial_buffer_len..];
             copied_from_input = cmp::min(unwritten.len(), input.len());
             unwritten[..copied_from_input].copy_from_slice(&input[..copied_from_input]);
         }
-        let spliced = &self.buffer[..buffer_len + copied_from_input];
+        let spliced = &self.buffer[..initial_buffer_len + copied_from_input];
         match str::from_utf8(spliced) {
-            Ok(valid) => {
-                self.buffer_len = 0;
-                Some((Ok(valid), &input[copied_from_input..]))
+            Ok(_) => {
+                self.buffer_len = spliced.len() as u8;
+                (copied_from_input, Some(Ok(())))
             }
             Err(error) => {
                 let valid_up_to = error.valid_up_to();
                 if valid_up_to > 0 {
-                    let valid = &self.buffer[..valid_up_to];
-                    let valid = unsafe {
-                        str::from_utf8_unchecked(valid)
-                    };
-                    let consumed = valid_up_to.checked_sub(buffer_len).unwrap();
-                    self.buffer_len = 0;
-                    Some((Ok(valid), &input[consumed..]))
+                    let consumed = valid_up_to.checked_sub(initial_buffer_len).unwrap();
+                    self.buffer_len = valid_up_to as u8;
+                    (consumed, Some(Ok(())))
                 } else {
                     match error.error_len() {
                         Some(invalid_sequence_length) => {
-                            let invalid = &spliced[..invalid_sequence_length];
-                            let consumed = invalid_sequence_length.checked_sub(buffer_len).unwrap();
-                            let rest = &input[consumed..];
-                            self.buffer_len = 0;
-                            Some((Err(invalid), rest))
+                            let consumed = invalid_sequence_length
+                                .checked_sub(initial_buffer_len).unwrap();
+                            self.buffer_len = invalid_sequence_length as u8;
+                            (consumed, Some(Err(())))
                         }
                         None => {
                             self.buffer_len = spliced.len() as u8;
-                            None
+                            (copied_from_input, None)
                         }
                     }
                 }

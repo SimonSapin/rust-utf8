@@ -1,7 +1,9 @@
 extern crate utf8;
 
 use std::borrow::Cow;
-use utf8::{decode, DecodeError, REPLACEMENT_CHARACTER, LossyDecoder};
+use std::collections::VecDeque;
+use std::io;
+use utf8::*;
 
 /// A re-implementation of std::str::from_utf8
 pub fn str_from_utf8(input: &[u8]) -> Result<&str, usize> {
@@ -117,30 +119,82 @@ fn test_string_from_utf8_lossy() {
     }
 }
 
-fn all_partitions<'a>(chunks: &mut Vec<&'a [u8]>, input: &'a [u8], expected: &str) {
-    if input.is_empty() {
-        println!("{:?}", chunks);
-        let mut string = String::new();
-        {
-            let mut decoder = LossyDecoder::new(|s| string.push_str(s));
-            for &chunk in &*chunks {
-                decoder.feed(chunk);
-            }
+pub fn all_partitions<'a, F>(input: &'a [u8], f: F)
+    where F: Fn(&[&[u8]])
+{
+
+    fn all_partitions_inner<'a, F>(chunks: &mut Vec<&'a [u8]>, input: &'a [u8], f: &F)
+        where F: Fn(&[&[u8]])
+    {
+        if input.is_empty() {
+            f(chunks)
         }
-        assert_eq!(string, expected);
+        for i in 1..(input.len() + 1) {
+            chunks.push(&input[..i]);
+            all_partitions_inner(chunks, &input[i..], f);
+            chunks.pop();
+        }
     }
-    for i in 1..(input.len() + 1) {
-        chunks.push(&input[..i]);
-        all_partitions(chunks, &input[i..], expected);
-        chunks.pop();
-    }
+
+    let mut chunks = Vec::new();
+    all_partitions_inner(&mut chunks, input, &f);
+    assert_eq!(chunks.len(), 0);
 }
 
 #[test]
 fn test_incremental_decoder() {
-    let mut chunks = Vec::new();
     for &(input, expected) in DECODED_LOSSY {
-        all_partitions(&mut chunks, input, expected);
-        assert_eq!(chunks.len(), 0);
+        all_partitions(input, |chunks| {
+            let mut string = String::new();
+            {
+                let mut decoder = LossyDecoder::new(|s| string.push_str(s));
+                for &chunk in &*chunks {
+                    decoder.feed(chunk);
+                }
+            }
+            assert_eq!(string, expected);
+        });
     }
+}
+
+#[test]
+fn test_bufread_decoder() {
+    for &(input, expected) in DECODED_LOSSY {
+        all_partitions(input, |chunks| {
+            let mut decoder = BufReadDecoder::new(Chunks(chunks.to_vec().into()));
+            let mut string = String::new();
+            while let Some(s) = decoder.next_lossy().unwrap() {
+                string.push_str(s)
+            }
+            assert_eq!(string, expected)
+        });
+    }
+}
+
+struct Chunks<'a>(VecDeque<&'a [u8]>);
+
+impl<'a> io::Read for Chunks<'a> {
+    fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+        unimplemented!()
+    }
+}
+
+impl<'a> io::BufRead for Chunks<'a> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        Ok(*self.0.front().unwrap())
+    }
+
+    fn consume(&mut self, bytes: usize) {
+        {
+            let front = self.0.front_mut().unwrap();
+            *front = &front[bytes..];
+            if !front.is_empty() {
+                return
+            }
+        }
+        if self.0.len() > 1 {
+            self.0.pop_front();
+        }
+    }
+
 }
