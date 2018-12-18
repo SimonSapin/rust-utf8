@@ -1,4 +1,6 @@
 use std::io::{self, BufRead};
+use std::error::Error;
+use std::fmt;
 use std::str;
 use super::*;
 
@@ -9,6 +11,7 @@ pub struct BufReadDecoder<B: BufRead> {
     incomplete: Incomplete,
 }
 
+#[derive(Debug)]
 pub enum BufReadDecoderError<'a> {
     /// Represents one UTF-8 error in the byte stream.
     ///
@@ -26,6 +29,24 @@ impl<'a> BufReadDecoderError<'a> {
         match self {
             BufReadDecoderError::Io(error) => Err(error),
             BufReadDecoderError::InvalidByteSequence(_) => Ok(REPLACEMENT_CHARACTER),
+        }
+    }
+}
+
+impl<'a> fmt::Display for BufReadDecoderError<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+      match *self {
+          BufReadDecoderError::InvalidByteSequence(_) => write!(f, "invalid byte sequence"),
+          BufReadDecoderError::Io(ref err) => write!(f, "underlying bytestream error: {}", err),
+      }
+    }
+}
+
+impl<'a> Error for BufReadDecoderError<'a> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match *self {
+            BufReadDecoderError::InvalidByteSequence(_) => None,
+            BufReadDecoderError::Io(ref err) => Some(err),
         }
     }
 }

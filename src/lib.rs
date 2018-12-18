@@ -5,6 +5,8 @@ pub use lossy::LossyDecoder;
 pub use read::{BufReadDecoder, BufReadDecoderError};
 
 use std::cmp;
+use std::error::Error;
+use std::fmt;
 use std::str;
 
 /// The replacement character, U+FFFD. In lossy decoding, insert it for every decoding error.
@@ -27,6 +29,17 @@ pub enum DecodeError<'a> {
         incomplete_suffix: Incomplete,
     },
 }
+
+impl<'a> fmt::Display for DecodeError<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            DecodeError::Invalid { .. } => write!(f, "invalid byte sequence"),
+            DecodeError::Incomplete { .. } => write!(f, "incomplete byte sequence"),
+        }
+    }
+}
+
+impl<'a> Error for DecodeError<'a> {}
 
 #[derive(Debug, Copy, Clone)]
 pub struct Incomplete {
