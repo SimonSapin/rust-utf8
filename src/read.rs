@@ -35,10 +35,12 @@ impl<'a> BufReadDecoderError<'a> {
 
 impl<'a> fmt::Display for BufReadDecoderError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-      match *self {
-          BufReadDecoderError::InvalidByteSequence(_) => write!(f, "invalid byte sequence"),
-          BufReadDecoderError::Io(ref err) => write!(f, "underlying bytestream error: {}", err),
-      }
+        match *self {
+            BufReadDecoderError::InvalidByteSequence(bytes) => {
+                write!(f, "invalid byte sequence: {:02x?}", bytes)
+            }
+            BufReadDecoderError::Io(ref err) => write!(f, "underlying bytestream error: {}", err),
+        }
     }
 }
 
