@@ -33,8 +33,16 @@ pub enum DecodeError<'a> {
 impl<'a> fmt::Display for DecodeError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            DecodeError::Invalid { .. } => write!(f, "invalid byte sequence"),
-            DecodeError::Incomplete { .. } => write!(f, "incomplete byte sequence"),
+            DecodeError::Invalid { valid_prefix, invalid_sequence, remaining_input, } => {
+                write!(f, "invalid byte sequence (preceding valid string of length {}: '{}'; \
+                           invalid byte sequence: {:02x?}; {} bytes follow)",
+                       valid_prefix.len(), valid_prefix, invalid_sequence, remaining_input.len())
+            }
+            DecodeError::Incomplete { valid_prefix, incomplete_suffix, } => {
+                write!(f, "incomplete byte sequence (preceding valid string of length {}: '{}'; \
+                           incomplete sequence: {:02x?})",
+                       valid_prefix.len(), valid_prefix, incomplete_suffix)
+            }
         }
     }
 }
