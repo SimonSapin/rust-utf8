@@ -33,16 +33,29 @@ pub enum DecodeError<'a> {
 impl<'a> fmt::Display for DecodeError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            DecodeError::Invalid { valid_prefix, invalid_sequence, remaining_input, } => {
-                write!(f, "invalid byte sequence (preceding valid string of length {}: '{}'; \
-                           invalid byte sequence: {:02x?}; {} bytes follow)",
-                       valid_prefix.len(), valid_prefix, invalid_sequence, remaining_input.len())
-            }
-            DecodeError::Incomplete { valid_prefix, incomplete_suffix, } => {
-                write!(f, "incomplete byte sequence (preceding valid string of length {}: '{}'; \
-                           incomplete sequence: {:02x?})",
-                       valid_prefix.len(), valid_prefix, incomplete_suffix)
-            }
+            DecodeError::Invalid {
+                valid_prefix,
+                invalid_sequence,
+                remaining_input,
+            } => write!(
+                f,
+                "found invalid byte sequence {invalid_sequence:02x?} after \
+                 {valid_byte_count} valid bytes, followed by {unprocessed_byte_count} more \
+                 unprocessed bytes",
+                invalid_sequence = invalid_sequence,
+                valid_byte_count = valid_prefix.len(),
+                unprocessed_byte_count = remaining_input.len()
+            ),
+            DecodeError::Incomplete {
+                valid_prefix,
+                incomplete_suffix,
+            } => write!(
+                f,
+                "found incomplete byte sequence {incomplete_suffix:02x?} after \
+                 {valid_byte_count} bytes",
+                incomplete_suffix = incomplete_suffix,
+                valid_byte_count = valid_prefix.len()
+            ),
         }
     }
 }
