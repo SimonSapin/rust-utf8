@@ -60,7 +60,11 @@ impl<'a> fmt::Display for DecodeError<'a> {
     }
 }
 
-impl<'a> Error for DecodeError<'a> {}
+impl<'a> Error for DecodeError<'a> {
+    fn description(&self) -> &'static str {
+        "description() is deprecated; use Display"
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct Incomplete {

@@ -45,6 +45,17 @@ impl<'a> fmt::Display for BufReadDecoderError<'a> {
 }
 
 impl<'a> Error for BufReadDecoderError<'a> {
+    fn description(&self) -> &'static str {
+        "description() is deprecated; use Display"
+    }
+    #[cfg(rust_legacy_error)]
+    fn cause(&self) -> Option<&Error> {
+        match *self {
+            BufReadDecoderError::InvalidByteSequence(_) => None,
+            BufReadDecoderError::Io(ref err) => Some(err),
+        }
+    }
+    #[cfg(not(rust_legacy_error))]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match *self {
             BufReadDecoderError::InvalidByteSequence(_) => None,
