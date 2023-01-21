@@ -1,5 +1,6 @@
-# rust-utf8
+## Archived
 
-Incremental, zero-copy UTF-8 decoding for Rust
+This repository is archived to reflect its level of (in)activity and set maintenance expectations.
 
-[Documentation](https://docs.rs/utf-8/)
+If some ideas or code in it are useful to you, feel free to use them in other repositories and crates
+in accordance with the license.
